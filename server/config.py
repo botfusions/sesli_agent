@@ -107,8 +107,8 @@ class SupabaseCrmTool(_Strict):
     parameters: dict[str, ToolParam] = Field(default_factory=_default_crm_params)
     url_env: str = "SUPABASE_URL"
     key_env: str = "SUPABASE_SERVICE_ROLE_KEY"
-    leads_table: str = "bots_leads"
-    tasks_table: str | None = "bots_tasks"       # None → görev açılmaz
+    leads_table: str = "crm_leads"
+    tasks_table: str | None = "crm_tasks"       # None → görev açılmaz
     lead_source: str = "Sesli Asistan"
     lead_status: str = "Meeting Scheduled"
     lead_tags: list[str] = Field(default_factory=lambda: ["sesli-asistan"])

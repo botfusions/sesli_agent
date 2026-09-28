@@ -88,9 +88,10 @@ Bilgi metnine **yalnızca doğrulanmış** bilgi yazın; talimat, bilmediği kon
 
 ## BOTCRm (Supabase) bağlantısı
 Asistan randevu aldığında kaydı doğrudan BOTCRm'e yazabilir (`type: supabase_crm` aracı):
-- `bots_leads`: e-postaya (yoksa telefona) göre aranır. Varsa durum/etiket güncellenir, yoksa yeni aday açılır (kaynak `Sesli Asistan`, durum `Meeting Scheduled`). Telefonlar `+90…` biçimine çevrilir.
-- `bots_tasks`: adaya bağlı "Demo görüşmesi: <ad> — tercih: <zaman>" görevi açılır.
-- `notes_column` verilirse (ör. `notes`) oturum sonu özeti adayın kaydına eklenir. BOTCRm'de şu an böyle bir kolon yok; açılınca etkinleştirin.
+- `crm_leads`: e-postaya (yoksa telefona) göre aranır. Varsa durum/etiket güncellenir, yoksa yeni aday açılır (kaynak `Sesli Asistan`, durum `Meeting Scheduled`). Telefonlar `+90…` biçimine çevrilir.
+- `crm_tasks`: adaya bağlı "Demo görüşmesi: <ad> — tercih: <zaman>" görevi açılır.
+- `notes_column: agent_note` ile oturum sonu özeti adayın kaydına eklenir.
+- BOTCRm, Coolify üzerindeki self-hosted Supabase'i kullanır: `SUPABASE_URL=https://supabase.turklawai.com`.
 
 `.env`'ye ekleyin (yalnızca sunucuda kalır, istemciye gitmez):
 ```

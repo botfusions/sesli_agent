@@ -50,7 +50,8 @@ knowledge: |
   - Fiyatlar, süreler ve referans müşteriler projeye göre değişir; bunlar demo görüşmesinde konuşulur.
 
 tools:
-  # Randevu talebi doğrudan BOTCRm'e (Supabase) yazılır: bots_leads'e aday, bots_tasks'a görev.
+  # Randevu talebi doğrudan BOTCRm'e (Supabase) yazılır: crm_leads'e aday, crm_tasks'a görev
+  # (self-hosted Supabase: SUPABASE_URL=https://supabase.turklawai.com).
   # Anahtarlar burada DEĞİL, .env'de: SUPABASE_URL ve SUPABASE_SERVICE_ROLE_KEY.
   # Webhook ile (ör. kendi sunucunuz ya da n8n) çalışmak için README'deki "type: webhook" örneğine bakın.
   - type: supabase_crm
@@ -58,8 +59,8 @@ tools:
     lead_source: Sesli Asistan
     lead_status: Meeting Scheduled
     lead_tags: [sesli-asistan]
-    tasks_table: bots_tasks
-    # notes_column: notes   # BOTCRm'de not kolonu açılınca görüşme özeti adaya eklenir
+    tasks_table: crm_tasks
+    notes_column: agent_note  # görüşme özeti adayın kaydına eklenir
     speak_while_running: false  # randevu kesin onay ister: sonuç gelmeden "alındı" demesin
 
 allowed_origins:

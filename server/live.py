@@ -121,14 +121,16 @@ class _Channel:
 def _language_directive(language: str) -> str:
     if language.lower().startswith("tr"):
         return (
-            "Dil: Varsayılan olarak Türkçe konuş. Kullanıcı açıkça başka bir dilde konuşursa "
-            "o dilde yanıt ver. Kısa, doğal ve sesli konuşmaya uygun cümleler kur; madde işareti, "
-            "tablo veya emoji kullanma."
+            "Dil: Kullanıcı hangi dilde konuşuyorsa o dilde yanıt ver; kullanıcı dil değiştirirse "
+            "sen de değiştir. Kullanıcının dili belli değilse Türkçe konuş. Bir yanıtta tek dil "
+            "kullan; başka dilden kelime karıştırma. Kısa, doğal ve sesli konuşmaya uygun cümleler "
+            "kur; madde işareti, tablo veya emoji kullanma."
         )
     return (
-        f"Language: respond in the language '{language}' by default; if the user clearly speaks "
-        "another language, switch to it. Keep replies short and natural for spoken conversation; "
-        "no bullet lists, tables or emoji."
+        "Language: reply in the language the user is speaking; if the user switches language, "
+        f"switch too. If the user's language is unclear, use '{language}'. Use a single language "
+        "per reply; never mix in words from other languages. Keep replies short and natural for "
+        "spoken conversation; no bullet lists, tables or emoji."
     )
 
 

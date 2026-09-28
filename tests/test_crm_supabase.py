@@ -17,11 +17,11 @@ KEY = "service-role-GIZLI-anahtar"
 
 
 class FakePostgrest:
-    """bots_leads / bots_tasks için eq filtresi, POST, PATCH destekleyen sahte REST."""
+    """crm_leads / crm_tasks için eq filtresi, POST, PATCH destekleyen sahte REST."""
 
     def __init__(self, fail: dict[str, int] | None = None):
-        self.tables: dict[str, list[dict]] = {"bots_leads": [], "bots_tasks": []}
-        self.fail = fail or {}          # {"bots_tasks:POST": 500}
+        self.tables: dict[str, list[dict]] = {"crm_leads": [], "crm_tasks": []}
+        self.fail = fail or {}          # {"crm_tasks:POST": 500}
         self.calls: list[tuple[str, str]] = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
@@ -89,29 +89,30 @@ def test_new_lead_and_task(env):
     tool = SupabaseCrmTool(type="supabase_crm")
     res = run(crm_supabase.book(tool, ARGS, session_id="s1", client=client_for(fake)))
     assert res == {"ok": True, "data": {"lead": "created", "task_created": True}}
-    lead = fake.tables["bots_leads"][0]
+    lead = fake.tables["crm_leads"][0]
     assert lead["email"] == "ayse@example.com"
     assert lead["source"] == "Sesli Asistan" and lead["status"] == "Meeting Scheduled"
     assert lead["tags"] == ["sesli-asistan"]
-    task = fake.tables["bots_tasks"][0]
+    assert lead["lead_name"] == ARGS["name"] and lead["budget"] == 0 and "full_name" not in lead
+    task = fake.tables["crm_tasks"][0]
     assert task["lead_id"] == lead["id"] and "cuma 10:00" in task["title"]
     assert KEY not in json.dumps(res)
 
 
 def test_existing_lead_updated_not_duplicated(env):
     fake = FakePostgrest()
-    fake.tables["bots_leads"].append({"id": "L1", "email": "ayse@example.com", "tags": ["vip"], "status": "New Lead"})
+    fake.tables["crm_leads"].append({"id": "L1", "email": "ayse@example.com", "tags": ["vip"], "status": "New Lead"})
     tool = SupabaseCrmTool(type="supabase_crm")
     res = run(crm_supabase.book(tool, ARGS, session_id="s1", client=client_for(fake)))
     assert res["ok"] and res["data"]["lead"] == "updated"
-    assert len(fake.tables["bots_leads"]) == 1
-    lead = fake.tables["bots_leads"][0]
+    assert len(fake.tables["crm_leads"]) == 1
+    lead = fake.tables["crm_leads"][0]
     assert lead["status"] == "Meeting Scheduled" and lead["tags"] == ["vip", "sesli-asistan"]
 
 
 def test_phone_fallback_and_normalization(env):
     fake = FakePostgrest()
-    fake.tables["bots_leads"].append({"id": "L2", "phone": "+905321234567", "tags": []})
+    fake.tables["crm_leads"].append({"id": "L2", "phone": "+905321234567", "tags": []})
     tool = SupabaseCrmTool(type="supabase_crm")
     args = {"name": "Mehmet", "phone": "0532 123 45 67", "preferred_time": "yarın"}
     res = run(crm_supabase.book(tool, args, session_id="s2", client=client_for(fake)))
@@ -140,23 +141,23 @@ def test_plain_http_url_rejected(env, monkeypatch):
 
 @pytest.mark.parametrize("status,code", [(401, "crm_unauthorized"), (500, "crm_error")])
 def test_http_errors(env, status, code):
-    fake = FakePostgrest(fail={"bots_leads:GET": status})
+    fake = FakePostgrest(fail={"crm_leads:GET": status})
     tool = SupabaseCrmTool(type="supabase_crm")
     assert run(crm_supabase.book(tool, ARGS, session_id="s", client=client_for(fake)))["error"] == code
 
 
 def test_task_failure_does_not_fail_booking(env):
-    fake = FakePostgrest(fail={"bots_tasks:POST": 500})
+    fake = FakePostgrest(fail={"crm_tasks:POST": 500})
     tool = SupabaseCrmTool(type="supabase_crm")
     res = run(crm_supabase.book(tool, ARGS, session_id="s", client=client_for(fake)))
-    assert res["ok"] and res["data"]["task_created"] is False and len(fake.tables["bots_leads"]) == 1
+    assert res["ok"] and res["data"]["task_created"] is False and len(fake.tables["crm_leads"]) == 1
 
 
 def test_no_tasks_table(env):
     fake = FakePostgrest()
     tool = SupabaseCrmTool(type="supabase_crm", tasks_table=None)
     res = run(crm_supabase.book(tool, ARGS, session_id="s", client=client_for(fake)))
-    assert res["data"]["task_created"] is False and fake.tables["bots_tasks"] == []
+    assert res["data"]["task_created"] is False and fake.tables["crm_tasks"] == []
 
 
 def test_attach_summary_with_notes_column(env):
@@ -165,7 +166,7 @@ def test_attach_summary_with_notes_column(env):
     c = client_for(fake)
     run(crm_supabase.book(tool, ARGS, session_id="s9", client=c))
     assert run(crm_supabase.attach_summary("s9", "- Demo istendi", client=c)) is True
-    assert "- Demo istendi" in fake.tables["bots_leads"][0]["notes"]
+    assert "- Demo istendi" in fake.tables["crm_leads"][0]["notes"]
     # ikinci kez eklenmez (oturum eşlemesi tüketildi)
     assert run(crm_supabase.attach_summary("s9", "tekrar", client=c)) is False
 
@@ -198,7 +199,7 @@ def test_adk_tool_dispatch_and_events(env):
 
 
 def test_adk_tool_error_is_safe(env):
-    fake = FakePostgrest(fail={"bots_leads:GET": 401})
+    fake = FakePostgrest(fail={"crm_leads:GET": 401})
     agent = AgentConfig(id="a1", name="A", instructions="i", tools=[{"type": "supabase_crm"}])
 
     async def on_event(e):

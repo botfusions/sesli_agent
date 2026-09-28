@@ -1,9 +1,9 @@
-"""Supabase CRM bağlantısı (BOTCRm tabloları: bots_leads, bots_tasks).
+"""Supabase CRM bağlantısı (BOTCRm crm_* şeması: crm_leads, crm_tasks; supabase.turklawai.com).
 
 Asistanın `type: supabase_crm` aracı çağrıldığında:
   1. Aday e-postaya (yoksa telefona) göre aranır; varsa durumu/etiketleri güncellenir,
      yoksa yeni aday eklenir (mükerrer kayıt açılmaz).
-  2. İsteğe bağlı olarak `bots_tasks` tablosuna demo görevi eklenir.
+  2. İsteğe bağlı olarak `crm_tasks` tablosuna demo görevi eklenir.
   3. Oturum bitince (özet üretilirse) `notes_column` tanımlıysa özet adayın kaydına eklenir.
 
 Supabase REST (PostgREST) doğrudan httpx ile çağrılır; ek bağımlılık yok.
@@ -142,12 +142,12 @@ class SupabaseCrm:
                                 prefer="return=minimal")
             return str(existing["id"]), False
         row: dict[str, Any] = {
-            "full_name": name,
+            "lead_name": name,
             "email": email,
             "phone": phone,
             "source": self.tool.lead_source,
             "status": self.tool.lead_status,
-            "value": 0,
+            "budget": 0,
             "tags": list(self.tool.lead_tags),
         }
         if note and self.tool.notes_column:

@@ -434,14 +434,14 @@ def test_book_uses_session_caller(crm_env):
     crm_supabase.set_session_caller("t1", "0532 123 45 67")
     res = asyncio.run(crm_supabase.book(tool, args, session_id="t1", client=client_for(fake)))
     assert res["ok"] is True
-    assert fake.tables["bots_leads"][0]["phone"] == CALLER_NORM
+    assert fake.tables["crm_leads"][0]["phone"] == CALLER_NORM
 
     # Model açıkça numara verdiyse o kullanılır
     fake2 = FakePostgrest()
     crm_supabase.set_session_caller("t2", CALLER)
     asyncio.run(crm_supabase.book(tool, dict(args, phone="0555 000 11 22"), session_id="t2",
                                   client=client_for(fake2)))
-    assert fake2.tables["bots_leads"][0]["phone"] == "+905550001122"
+    assert fake2.tables["crm_leads"][0]["phone"] == "+905550001122"
 
     crm_supabase.forget_session_caller("t1")
     assert "t1" not in crm_supabase._session_callers
