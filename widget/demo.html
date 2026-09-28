@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sesli Asistan Demo — Botfusions</title>
+<meta name="description" content="Botfusions sesli asistan widget'ının örnek müşteri sayfasında canlı demosu.">
+<style>
+  /* Örnek müşteri sayfası: widget'ın gerçek bir sitede nasıl durduğunu gösterir */
+  :root {
+    --bg: #0E0B15;
+    --bg2: #17121f;
+    --line: #2a2336;
+    --text: #EDE8DF;
+    --muted: #a79fb2;
+    --accent: #A855F7;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    min-height: 100vh;
+  }
+  a { color: var(--accent); }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 20px; }
+  nav { display: flex; align-items: center; justify-content: space-between; padding: 22px 0; border-bottom: 1px solid var(--line); }
+  .brand { font-weight: 700; letter-spacing: .02em; }
+  .brand span { color: var(--accent); }
+  nav small { color: var(--muted); }
+  .hero { padding: 64px 0 40px; }
+  .eyebrow { color: var(--accent); font-size: 13px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; margin: 0 0 12px; }
+  h1 { font-size: clamp(30px, 6vw, 48px); line-height: 1.12; margin: 0 0 18px; font-weight: 750; letter-spacing: -.01em; }
+  .lead { color: var(--muted); font-size: 18px; max-width: 620px; margin: 0; }
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 40px 0; padding: 0; list-style: none; counter-reset: s; }
+  .steps li { background: var(--bg2); border: 1px solid var(--line); border-radius: 14px; padding: 18px; counter-increment: s; }
+  .steps li::before { content: counter(s); display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: #0E0B15; font-weight: 700; font-size: 14px; margin-bottom: 10px; }
+  .steps strong { display: block; margin-bottom: 4px; }
+  .steps p { margin: 0; color: var(--muted); font-size: 14.5px; }
+  h2 { font-size: 20px; margin: 48px 0 12px; }
+  .embed { position: relative; background: #09070e; border: 1px solid var(--line); border-radius: 12px; }
+  .embed pre { margin: 0; padding: 18px 18px 18px; overflow-x: auto; font: 13.5px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #d9d2e6; }
+  .embed button { position: absolute; top: 10px; right: 10px; border: 1px solid var(--line); background: var(--bg2); color: var(--text); border-radius: 8px; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+  .embed button:hover { border-color: var(--accent); }
+  :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .note { color: var(--muted); font-size: 14.5px; }
+  footer { margin-top: 64px; padding: 24px 0 120px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; }
+  @media (max-width: 640px) {
+    .steps { grid-template-columns: 1fr; }
+    .hero { padding-top: 40px; }
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <nav>
+      <div class="brand">Botfusions <span>Voice</span></div>
+      <small>Örnek müşteri sayfası</small>
+    </nav>
+
+    <main>
+      <section class="hero">
+        <p class="eyebrow">Canlı demo</p>
+        <h1>Sitenize konuşan bir asistan ekleyin.</h1>
+        <p class="lead">Sağ alttaki mikrofon düğmesine basın ve Türkçe konuşmaya başlayın. Asistan sizi dinler, sesli yanıt verir; siz konuşurken sözünü kesebilirsiniz.</p>
+      </section>
+
+      <ol class="steps">
+        <li><strong>Düğmeye basın</strong><p>Tarayıcı mikrofon izni ister. İzin vermezseniz yazarak da görüşebilirsiniz.</p></li>
+        <li><strong>Konuşun</strong><p>Sorunuzu doğal bir dille sorun; konuşma dökümü panelde anlık görünür.</p></li>
+        <li><strong>Bitirin</strong><p>Paneli kapattığınızda görüşme sona erer, mikrofon kapanır.</p></li>
+      </ol>
+
+      <h2 id="embed-title">Kendi sitenize gömün</h2>
+      <p class="note">Aşağıdaki satırı sitenizin <code>&lt;body&gt;</code> etiketinin sonuna ekleyin. Sitenizin adresi asistan ayarlarındaki izinli adresler listesinde olmalıdır.</p>
+      <div class="embed">
+        <pre aria-labelledby="embed-title"><code id="embed-code">&lt;script src="{{BASE_URL}}/widget/voice-agent.js" data-agent="{{AGENT_ID}}" defer&gt;&lt;/script&gt;</code></pre>
+        <button type="button" id="copy-btn" aria-describedby="embed-title">Kopyala</button>
+      </div>
+      <p class="note" id="copy-status" role="status" aria-live="polite"></p>
+    </main>
+
+    <footer>
+      Bu sayfa bir örnektir. Asistan: <strong>{{AGENT_ID}}</strong>
+    </footer>
+  </div>
+
+  <script>
+    // Gömme kodunu panoya kopyala (Clipboard API yoksa seçip execCommand ile dener)
+    (function () {
+      var btn = document.getElementById('copy-btn');
+      var code = document.getElementById('embed-code');
+      var status = document.getElementById('copy-status');
+      btn.addEventListener('click', function () {
+        var text = code.textContent;
+        function done(ok) {
+          status.textContent = ok ? 'Gömme kodu panoya kopyalandı.' : 'Kopyalanamadı; kodu seçip elle kopyalayın.';
+          btn.textContent = ok ? 'Kopyalandı' : 'Kopyala';
+          setTimeout(function () { btn.textContent = 'Kopyala'; }, 2000);
+        }
+        if (navigator.clipboard && window.isSecureContext) {
+          navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
+        } else {
+          var r = document.createRange();
+          r.selectNodeContents(code);
+          var sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(r);
+          var ok = false;
+          try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+          done(ok);
+        }
+      });
+    })();
+  </script>
+
+  <!-- Asistan widget'ı: sunucu adresi ve asistan kimliği sunucu tarafından yerleştirilir -->
+  <script src="{{BASE_URL}}/widget/voice-agent.js" data-agent="{{AGENT_ID}}" defer></script>
+</body>
+</html>

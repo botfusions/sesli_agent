@@ -1,0 +1,10 @@
+services:
+  voice-agent:
+    build: .
+    env_file: .env
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./data:/app/data        # SQLite kayıtları
+      - ./agents:/app/agents:ro # asistan yapılandırmaları (yeniden imaj almadan değiştirilebilir)
+    restart: unless-stopped

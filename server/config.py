@@ -1,0 +1,260 @@
+"""Asistan yapılandırması (AgentConfig) şeması ve YAML yükleyici.
+
+Her asistan `agents/<id>.yaml` dosyasında tanımlanır; dosya adı id ile aynı olmalıdır.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+import threading
+from pathlib import Path
+from typing import Literal
+from urllib.parse import urlsplit
+
+import yaml
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
+
+logger = logging.getLogger(__name__)
+
+AGENT_ID_RE = re.compile(r"^[a-z0-9-]{2,40}$")
+TOOL_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{1,40}$")
+COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
+ENV_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+PARAM_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,63}$")
+MAX_KNOWLEDGE_CHARS = 20_000
+
+
+class _Strict(BaseModel):
+    # YAML'daki yazım hatalarını sessizce yutmamak için bilinmeyen alanlar hata verir
+    model_config = ConfigDict(extra="forbid")
+
+
+class ToolParam(_Strict):
+    """Araç parametresi (JSON Schema alt kümesi)."""
+
+    type: Literal["string", "number", "integer", "boolean"]
+    description: str = ""
+    enum: list[str] | None = None
+    required: bool = True
+
+
+class WebhookTool(_Strict):
+    name: str
+    description: str
+    parameters: dict[str, ToolParam] = Field(default_factory=dict)
+    url: HttpUrl
+    method: Literal["POST", "GET"] = "POST"
+    timeout_s: float = Field(default=8.0, ge=1, le=30)
+    secret_env: str | None = None
+    speak_while_running: bool = True
+
+    @field_validator("name")
+    @classmethod
+    def _check_name(cls, v: str) -> str:
+        if not TOOL_NAME_RE.match(v):
+            raise ValueError("araç adı ^[a-z][a-z0-9_]{1,40}$ biçiminde olmalı")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def _check_description(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("araç açıklaması boş olamaz")
+        return v.strip()
+
+    @field_validator("parameters")
+    @classmethod
+    def _check_params(cls, v: dict[str, ToolParam]) -> dict[str, ToolParam]:
+        for key in v:
+            if not PARAM_NAME_RE.match(key):
+                raise ValueError(f"geçersiz parametre adı: {key!r}")
+        return v
+
+    @field_validator("secret_env")
+    @classmethod
+    def _check_secret_env(cls, v: str | None) -> str | None:
+        if v is not None and not ENV_NAME_RE.match(v):
+            raise ValueError("secret_env bir ortam değişkeni ADI olmalı (ör. BOOK_DEMO_SECRET)")
+        return v
+
+
+class Limits(_Strict):
+    max_session_seconds: int = Field(default=600, ge=10, le=3600)
+    max_daily_sessions: int = Field(default=200, ge=0)
+    max_daily_minutes: int = Field(default=300, ge=0)
+
+
+class Theme(_Strict):
+    title: str = "Sesli Asistan"
+    primary_color: str = "#A855F7"
+    position: Literal["bottom-right", "bottom-left"] = "bottom-right"
+
+    @field_validator("primary_color")
+    @classmethod
+    def _check_color(cls, v: str) -> str:
+        if not COLOR_RE.match(v):
+            raise ValueError("primary_color #RRGGBB biçiminde olmalı")
+        return v
+
+
+class AgentConfig(_Strict):
+    id: str
+    name: str
+    language: str = "tr-TR"
+    voice: str = "Kore"
+    model: str | None = None
+    instructions: str
+    greeting: str | None = None
+    knowledge: str | None = None
+    tools: list[WebhookTool] = Field(default_factory=list)
+    allowed_origins: list[str] = Field(default_factory=list)
+    limits: Limits = Field(default_factory=Limits)
+    theme: Theme = Field(default_factory=Theme)
+
+    @field_validator("id")
+    @classmethod
+    def _check_id(cls, v: str) -> str:
+        if not AGENT_ID_RE.match(v):
+            raise ValueError("id ^[a-z0-9-]{2,40}$ biçiminde olmalı")
+        return v
+
+    @field_validator("instructions")
+    @classmethod
+    def _check_instructions(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("instructions boş olamaz")
+        return v.strip()
+
+    @field_validator("knowledge")
+    @classmethod
+    def _check_knowledge(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > MAX_KNOWLEDGE_CHARS:
+            raise ValueError(f"knowledge en fazla {MAX_KNOWLEDGE_CHARS} karakter olabilir")
+        return v
+
+    @field_validator("allowed_origins")
+    @classmethod
+    def _check_origins(cls, v: list[str]) -> list[str]:
+        out: list[str] = []
+        for item in v:
+            norm = normalize_origin(item)
+            if norm is None:
+                raise ValueError(f"geçersiz origin: {item!r} (ör. https://ornek.com)")
+            out.append(norm)
+        return out
+
+    @model_validator(mode="after")
+    def _check_unique_tools(self) -> "AgentConfig":
+        names = [t.name for t in self.tools]
+        if len(names) != len(set(names)):
+            raise ValueError("araç adları benzersiz olmalı")
+        return self
+
+
+def normalize_origin(value: str | None) -> str | None:
+    """Origin'i `scheme://host[:port]` biçimine indirger (küçük harf, varsayılan port atılır).
+
+    Geçersizse None döner.
+    """
+    if not value or not isinstance(value, str):
+        return None
+    value = value.strip()
+    try:
+        parts = urlsplit(value)
+        port = parts.port
+    except ValueError:
+        return None
+    scheme = (parts.scheme or "").lower()
+    host = (parts.hostname or "").lower()
+    if scheme not in {"http", "https"} or not host:
+        return None
+    if parts.path not in {"", "/"} or parts.query or parts.fragment:
+        return None
+    if ":" in host:  # IPv6 adresi köşeli parantezle yazılır
+        host = f"[{host}]"
+    if port is None or (scheme == "http" and port == 80) or (scheme == "https" and port == 443):
+        return f"{scheme}://{host}"
+    return f"{scheme}://{host}:{port}"
+
+
+class AgentConfigError(ValueError):
+    """YAML dosyası geçersiz."""
+
+
+def load_agent_file(path: Path) -> AgentConfig:
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise AgentConfigError(f"{path.name}: YAML okunamadı: {exc}") from exc
+    if not isinstance(data, dict):
+        raise AgentConfigError(f"{path.name}: kök öğe bir sözlük olmalı")
+    try:
+        agent = AgentConfig.model_validate(data)
+    except ValueError as exc:
+        raise AgentConfigError(f"{path.name}: {exc}") from exc
+    if agent.id != path.stem:
+        raise AgentConfigError(f"{path.name}: dosya adı id ile aynı olmalı (id={agent.id!r})")
+    return agent
+
+
+def load_agents(dir: Path) -> dict[str, AgentConfig]:  # noqa: A002 (SPEC imzası)
+    """Klasördeki tüm *.yaml / *.yml dosyalarını yükler; hatalı dosya varsa istisna fırlatır."""
+    directory = Path(dir)
+    agents: dict[str, AgentConfig] = {}
+    if not directory.is_dir():
+        logger.warning("Agents directory not found: %s", directory)
+        return agents
+    files = sorted([*directory.glob("*.yaml"), *directory.glob("*.yml")])
+    for path in files:
+        agent = load_agent_file(path)
+        if agent.id in agents:
+            raise AgentConfigError(f"{path.name}: aynı id iki kez tanımlı ({agent.id})")
+        agents[agent.id] = agent
+    return agents
+
+
+# --- Süreç içi kayıt defteri -------------------------------------------------
+
+_registry: dict[str, AgentConfig] | None = None
+_lock = threading.Lock()
+
+
+def set_agents(agents: dict[str, AgentConfig]) -> None:
+    """Kayıt defterini doğrudan ayarla (uygulama açılışı ve testler)."""
+    global _registry
+    with _lock:
+        _registry = dict(agents)
+
+
+def reload_agents() -> dict[str, AgentConfig]:
+    from server.settings import get_settings
+
+    agents = load_agents(get_settings().agents_dir)
+    set_agents(agents)
+    return agents
+
+
+def all_agents() -> dict[str, AgentConfig]:
+    if _registry is None:
+        reload_agents()
+    return dict(_registry or {})
+
+
+def get_agent(agent_id: str) -> AgentConfig:
+    """Asistanı döndürür; yoksa KeyError (HTTP katmanında 404)."""
+    agents = all_agents()
+    if agent_id not in agents:
+        raise KeyError(agent_id)
+    return agents[agent_id]
+
+
+def public_view(agent: AgentConfig) -> dict:
+    """Widget'a gönderilebilecek güvenli alt küme (talimat, araç, bilgi metni YOK)."""
+    return {
+        "id": agent.id,
+        "name": agent.name,
+        "greeting": agent.greeting,
+        "theme": agent.theme.model_dump(),
+        "language": agent.language,
+    }
