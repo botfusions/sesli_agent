@@ -1,0 +1,55 @@
+# Coolify dağıtımı (Docker Compose build pack → "Docker Compose Location": /docker-compose.coolify.yml)
+# Yerel geliştirme için docker-compose.yml kullanılır; buradaki farklar:
+#  - asterisk her zaman açık (profil yok)
+#  - değerler Coolify arayüzünden gelir (${...}); .env dosyası yok
+#  - voice-agent'ın portu yayınlanmaz: alan adını Coolify'da voice-agent'a :8090 ile verin (HTTPS proxy)
+#  - Vertex servis hesabı sunucudaki dosyadan salt-okunur bağlanır (Coolify DB'sine girmez)
+services:
+  voice-agent:
+    build: .
+    environment:
+      GOOGLE_GENAI_USE_VERTEXAI: ${GOOGLE_GENAI_USE_VERTEXAI:-true}
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT}
+      GOOGLE_CLOUD_LOCATION: ${GOOGLE_CLOUD_LOCATION:-us-central1}
+      GOOGLE_APPLICATION_CREDENTIALS: /app/secrets/vertex.json
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      LIVE_MODEL: ${LIVE_MODEL:-gemini-3.8-live}
+      SUMMARY_MODEL: ${SUMMARY_MODEL:-gemini-3.8-flash}
+      SUMMARY_LOCATION: ${SUMMARY_LOCATION:-global}
+      ADMIN_TOKEN: ${ADMIN_TOKEN}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      TELEPHONY_ENABLED: "true"
+      TELEPHONY_SECRET: ${TELEPHONY_SECRET}
+      TELEPHONY_AGENT: ${TELEPHONY_AGENT:-botfusions-satis}
+    expose:
+      - "8090"
+      - "9092"   # AudioSocket: yalnızca iç ağ
+    volumes:
+      - sesli-data:/app/data
+      - ${VERTEX_KEY_FILE:-/opt/sesli-agent/secrets/vertex.json}:/app/secrets/vertex.json:ro
+    restart: unless-stopped
+
+  asterisk:
+    build: ./asterisk
+    depends_on:
+      - voice-agent
+    environment:
+      TELEPHONY_SECRET: ${TELEPHONY_SECRET}
+      TELEPHONY_AGENT: ${TELEPHONY_AGENT:-botfusions-satis}
+      TELEPHONY_API_URL: http://voice-agent:8090/telephony/asterisk/call
+      AUDIOSOCKET_TARGET: voice-agent:9092
+      NETGSM_SIP_USER: ${NETGSM_SIP_USER}
+      NETGSM_SIP_PASSWORD: ${NETGSM_SIP_PASSWORD}
+      NETGSM_SIP_SERVER: ${NETGSM_SIP_SERVER:-sip.netgsm.com.tr}
+      EXTERNAL_IP: ${EXTERNAL_IP}
+      RTP_START: "10000"
+      RTP_END: "10100"
+    ports:
+      - "5060:5060/udp"
+      - "10000-10100:10000-10100/udp"
+    restart: unless-stopped
+
+volumes:
+  sesli-data:
