@@ -147,7 +147,7 @@ def test_repo_agent_yaml_is_valid():
     # Örnek asistan randevuyu doğrudan BOTCRm'e (Supabase) yazar ve sonucu bekler
     assert tool.type == "supabase_crm"
     assert tool.speak_while_running is False
-    assert {"name", "email", "phone", "preferred_time"} <= set(tool.parameters)
+    assert {"name", "email", "phone", "date", "time", "topic"} <= set(tool.parameters)
 
 
 def test_telephony_defaults_and_validation(tmp_path):

@@ -81,7 +81,8 @@ def run(coro):
     return asyncio.run(coro)
 
 
-ARGS = {"name": "Ayşe Yılmaz", "email": " Ayse@Example.com ", "preferred_time": "cuma 10:00"}
+ARGS = {"name": "Ayşe Yılmaz", "email": " Ayse@Example.com ", "date": "2026-10-02", "time": "10:00",
+        "topic": "Sesli asistan"}
 
 
 def test_new_lead_and_task(env):
@@ -95,7 +96,8 @@ def test_new_lead_and_task(env):
     assert lead["tags"] == ["sesli-asistan"]
     assert lead["lead_name"] == ARGS["name"] and lead["budget"] == 0 and "full_name" not in lead
     task = fake.tables["crm_tasks"][0]
-    assert task["lead_id"] == lead["id"] and "cuma 10:00" in task["title"]
+    assert task["lead_id"] == lead["id"] and task["title"] == "10:00 · Sesli asistan — Ayşe Yılmaz"
+    assert task["due_date"] == "2026-10-02"
     assert KEY not in json.dumps(res)
 
 
@@ -114,14 +116,14 @@ def test_phone_fallback_and_normalization(env):
     fake = FakePostgrest()
     fake.tables["crm_leads"].append({"id": "L2", "phone": "+905321234567", "tags": []})
     tool = SupabaseCrmTool(type="supabase_crm")
-    args = {"name": "Mehmet", "phone": "0532 123 45 67", "preferred_time": "yarın"}
+    args = {"name": "Mehmet", "phone": "0532 123 45 67", "date": "2026-10-02", "time": "9:05"}
     res = run(crm_supabase.book(tool, args, session_id="s2", client=client_for(fake)))
     assert res["ok"] and res["data"]["lead"] == "updated"
 
 
 def test_requires_contact(env):
     tool = SupabaseCrmTool(type="supabase_crm")
-    res = run(crm_supabase.book(tool, {"name": "X", "preferred_time": "yarın", "email": "gecersiz"},
+    res = run(crm_supabase.book(tool, {"name": "X", "date": "2026-10-02", "time": "10:00", "email": "gecersiz"},
                                 session_id="s", client=client_for(FakePostgrest())))
     assert res == {"ok": False, "error": "invalid_args"}
 
@@ -192,7 +194,7 @@ def test_adk_tool_dispatch_and_events(env):
     # kesin onay: bloklayıcı çalışır (NON_BLOCKING değil)
     assert built[0].behavior is None
     decl = built[0]._get_declaration()
-    assert decl.name == "book_demo" and set(decl.parameters.required) == {"name", "preferred_time"}
+    assert decl.name == "book_demo" and set(decl.parameters.required) == {"name", "date", "time", "topic"}
     res = run(built[0].run_async(args=ARGS, tool_context=None))
     assert res["ok"] is True
     assert [e["status"] for e in events] == ["start", "ok"]
@@ -214,3 +216,11 @@ def test_adk_tool_error_is_safe(env):
 def test_yaml_rejects_secret_values():
     with pytest.raises(Exception):
         SupabaseCrmTool(type="supabase_crm", key_env="eyJhbGciOiJIUzI1NiJ9.gizli")
+
+
+def test_rejects_unparseable_date_or_time(env):
+    tool = SupabaseCrmTool(type="supabase_crm")
+    for bad in ({"date": "yarın", "time": "10:00"}, {"date": "2026-10-02", "time": "öğlen"}, {"date": "2026-10-02"}):
+        res = run(crm_supabase.book(tool, dict(name="X", email="x@example.com", **bad),
+                                    session_id="s", client=client_for(FakePostgrest())))
+        assert res == {"ok": False, "error": "invalid_args"}, bad

@@ -13,6 +13,7 @@ dışarıdan verilen `upstream` coroutine'idir.
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import json
 import logging
 import time
@@ -134,12 +135,24 @@ def _language_directive(language: str) -> str:
     )
 
 
+# ponytail: Türkiye 2016'dan beri sabit UTC+3; başka ülke gerekirse agent'a zoneinfo alanı ekle
+_TR_TZ = dt.timezone(dt.timedelta(hours=3))
+_GUNLER = ("Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar")
+
+
+def _date_directive(now: dt.datetime | None = None) -> str:
+    now = now or dt.datetime.now(_TR_TZ)
+    return (f"Bugün {now:%Y-%m-%d}, {_GUNLER[now.weekday()]}; saat {now:%H:%M} (Türkiye). "
+            "'Yarın', 'cuma' gibi ifadeleri bu tarihe göre takvim tarihine çevir.")
+
+
 def build_instruction(agent: AgentConfig, extra_instruction: str | None = None) -> str:
-    """Sistem talimatı = instructions + knowledge + dil talimatı (+ kanala özel ek talimat)."""
+    """Sistem talimatı = instructions + knowledge + dil + tarih talimatı (+ kanala özel ek talimat)."""
     parts = [agent.instructions.strip()]
     if agent.knowledge and agent.knowledge.strip():
         parts.append("## Bilgi (yalnızca buna dayanarak yanıt ver)\n" + agent.knowledge.strip())
     parts.append(_language_directive(agent.language))
+    parts.append(_date_directive())
     if agent.learning.enabled and (block := learning.load_block(agent.id)):
         parts.append(block)
     if extra_instruction and extra_instruction.strip():

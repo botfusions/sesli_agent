@@ -343,3 +343,9 @@ def test_demo_page(env, monkeypatch, tmp_path):
     assert 'src="http://testserver/widget/voice-agent.js"' in r.text
     assert 'data-agent="test-agent"' in r.text
     assert client.get("/demo/olmayan").status_code == 404
+
+
+def test_date_directive_uses_turkey_date():
+    now = live.dt.datetime(2026, 9, 29, 1, 30, tzinfo=live._TR_TZ)
+    text = live._date_directive(now)
+    assert "2026-09-29" in text and "Salı" in text and "01:30" in text

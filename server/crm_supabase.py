@@ -157,15 +157,14 @@ class SupabaseCrm:
             raise CrmError("crm_error")
         return str(data[0]["id"]), True
 
-    async def create_task(self, *, lead_id: str, name: str, preferred_time: str) -> None:
+    async def create_task(self, *, lead_id: str, name: str, date: dt.date, time: str, topic: str) -> None:
         if not self.tool.tasks_table:
             return
         body = [{
-            "title": f"Demo görüşmesi: {name} — tercih: {preferred_time}"[:200],
+            # crm_tasks'ta saat/konu sütunu yok: tarih due_date'e, saat ve konu başlığa
+            "title": f"{time} · {topic} — {name}"[:200],
             "completed": False,
-            # Tercih edilen zaman serbest metin ("cuma 10:00"); güvenilir tarih çıkarılamadığı için
-            # görev bugüne tarihlenir, asıl zaman başlıkta durur.
-            "due_date": dt.date.today().isoformat(),
+            "due_date": date.isoformat(),
             "assigned_to": self.tool.task_assigned_to,
             "lead_id": lead_id,
         }]
@@ -214,9 +213,14 @@ async def book(tool: "SupabaseCrmTool", args: dict, *, session_id: str,
     email = _normalize_email(args.get("email"))
     # Telefon kanalında numara zaten biliniyor: model sormadıysa arayanın numarası kullanılır
     phone = _normalize_phone(args.get("phone")) or _session_callers.get(session_id)
-    preferred_time = (args.get("preferred_time") or "").strip()
+    topic = (args.get("topic") or "").strip() or "Demo görüşmesi"
     note = (args.get("note") or "").strip() or None
-    if not name or not preferred_time or not (email or phone):
+    try:
+        date = dt.date.fromisoformat((args.get("date") or "").strip())
+        time = dt.datetime.strptime((args.get("time") or "").strip(), "%H:%M").strftime("%H:%M")
+    except ValueError:
+        date = time = None
+    if not name or not date or not time or not (email or phone):
         return {"ok": False, "error": "invalid_args"}
     try:
         crm = SupabaseCrm(tool, client=client)
@@ -224,7 +228,7 @@ async def book(tool: "SupabaseCrmTool", args: dict, *, session_id: str,
         _remember(session_id, tool, lead_id)
         task_created = False
         try:
-            await crm.create_task(lead_id=lead_id, name=name, preferred_time=preferred_time)
+            await crm.create_task(lead_id=lead_id, name=name, date=date, time=time, topic=topic)
             task_created = bool(tool.tasks_table)
         except CrmError as exc:
             # Aday kaydedildi; görev açılamaması randevu talebini bozmaz

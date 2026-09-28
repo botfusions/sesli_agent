@@ -427,7 +427,7 @@ def crm_env(monkeypatch):
 
 def test_book_uses_session_caller(crm_env):
     tool = SupabaseCrmTool(type="supabase_crm")
-    args = {"name": "Ali Veli", "preferred_time": "yarın 14:00"}
+    args = {"name": "Ali Veli", "date": "2026-10-02", "time": "14:00"}
     fake = FakePostgrest()
     assert asyncio.run(crm_supabase.book(tool, args, session_id="t0", client=client_for(fake)))["error"] == "invalid_args"
 

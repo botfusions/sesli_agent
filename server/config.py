@@ -86,7 +86,9 @@ def _default_crm_params() -> dict[str, "ToolParam"]:
         "name": ToolParam(type="string", description="Kişinin adı soyadı"),
         "email": ToolParam(type="string", description="E-posta adresi (e-posta veya telefondan en az biri)", required=False),
         "phone": ToolParam(type="string", description="Telefon numarası (e-posta veya telefondan en az biri)", required=False),
-        "preferred_time": ToolParam(type="string", description="Kişinin tercih ettiği görüşme günü/saati, söylediği gibi"),
+        "date": ToolParam(type="string", description="Görüşme tarihi, YYYY-MM-DD (ör. 2026-10-02)"),
+        "time": ToolParam(type="string", description="Görüşme saati, 24 saat HH:MM (ör. 14:30)"),
+        "topic": ToolParam(type="string", description="Görüşmenin konusu, kısa (ör. 'Web sitesi için sesli asistan')"),
         "note": ToolParam(type="string", description="Kişinin ihtiyacına dair kısa not", required=False),
     }
 
