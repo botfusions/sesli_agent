@@ -181,6 +181,13 @@ class Telephony(_Strict):
     instructions: str | None = None               # yalnızca telefon kanalına eklenen talimat
 
 
+class Learning(_Strict):
+    """Öğrenme döngüsü (server/learning.py): görüşme sonrası ders/hata çıkarıp talimata ekler."""
+
+    enabled: bool = False
+    max_items: int = Field(default=30, ge=1, le=100)   # dosya başına tutulan madde
+
+
 class AgentConfig(_Strict):
     id: str
     name: str
@@ -195,6 +202,7 @@ class AgentConfig(_Strict):
     limits: Limits = Field(default_factory=Limits)
     theme: Theme = Field(default_factory=Theme)
     telephony: Telephony = Field(default_factory=Telephony)
+    learning: Learning = Field(default_factory=Learning)
 
     @field_validator("id")
     @classmethod

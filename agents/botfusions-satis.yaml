@@ -78,6 +78,11 @@ telephony:
   greeting: "Merhaba, Botfusions'a hoş geldiniz. Ben yapay zekâ asistanıyım; görüşmemiz kalite için kaydedilir. Size nasıl yardımcı olabilirim?"
   max_daily_calls_per_caller: 5
 
+# Öğrenme döngüsü: her görüşmeden sonra ders/hata çıkarır → data/learning/botfusions-satis/{lessons,errors}.md
+# Dosyalar elle düzenlenebilir; kötü bir maddeyi silmek yeterli.
+learning:
+  enabled: true
+
 theme:
   title: Botfusions Asistan
   primary_color: "#A855F7"

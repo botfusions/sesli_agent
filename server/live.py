@@ -27,7 +27,7 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
-from server import config, limits, summary, tools
+from server import config, learning, limits, summary, tools
 from server.config import AgentConfig
 
 logger = logging.getLogger(__name__)
@@ -140,6 +140,8 @@ def build_instruction(agent: AgentConfig, extra_instruction: str | None = None) 
     if agent.knowledge and agent.knowledge.strip():
         parts.append("## Bilgi (yalnızca buna dayanarak yanıt ver)\n" + agent.knowledge.strip())
     parts.append(_language_directive(agent.language))
+    if agent.learning.enabled and (block := learning.load_block(agent.id)):
+        parts.append(block)
     if extra_instruction and extra_instruction.strip():
         parts.append(extra_instruction.strip())
     return "\n\n".join(parts)
@@ -564,6 +566,10 @@ async def _finish(chan, store, agent, session_id, reason, usage: _Usage, transcr
         task = asyncio.create_task(_summarize_later(store, session_id, list(transcript), agent.language))
         _background_tasks.add(task)
         task.add_done_callback(_background_tasks.discard)
+        if agent.learning.enabled:
+            task = asyncio.create_task(learning.reflect(agent.id, list(transcript), agent.learning.max_items))
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
 
 
 async def _summarize_later(store, session_id: str, transcript: list[dict], language: str) -> None:
