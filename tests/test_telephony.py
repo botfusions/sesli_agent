@@ -76,7 +76,7 @@ class PhoneRunner:
                 yield _ev(interrupted=True)
 
 
-async def fake_summarize(transcript, language="tr"):
+async def fake_summarize(transcript, language="tr", on_usage=None):
     return "özet"
 
 

@@ -24,9 +24,14 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 
 __all__ = ["router", "COST_PER_1M"]
 
-# Tahmini maliyet için 1 milyon token başına USD fiyatı.
-# DİKKAT: Bu değerler doğrulanmadı, kendi fiyatınızla (model, ses/metin ayrımı, bölge) güncelleyin.
-COST_PER_1M = {"input": 3.00, "output": 12.00}
+# Tahmini maliyet: 1 milyon token başına USD (Vertex liste fiyatı, 2026-09-29).
+# live_*: gemini-3.8-live; aux_*: gemini-3.8-flash (görüşme sonrası özet + öğrenme).
+# Flash tanıtım fiyatı 2026-12-31'e kadar; 2027-01-01'den itibaren aux_in 1.50, aux_out 7.50.
+COST_PER_1M = {
+    "live_in_text": 0.75, "live_in_audio": 3.00,
+    "live_out_text": 4.50, "live_out_audio": 12.00,
+    "aux_in": 0.75, "aux_out": 3.75,
+}
 
 COOKIE_NAME = "bf_admin"
 COOKIE_MAX_AGE = 12 * 60 * 60  # 12 saat
@@ -175,14 +180,40 @@ def _fmt_duration(sec: Any) -> str:
     return f"{m} dk {s:02d} sn" if m else f"{s} sn"
 
 
-def estimate_cost(input_tokens: Any, output_tokens: Any) -> float:
-    """COST_PER_1M'e göre tahmini USD maliyet."""
+def _num(v: Any) -> float:
     try:
-        i = float(input_tokens or 0)
-        o = float(output_tokens or 0)
+        return float(v or 0)
     except (TypeError, ValueError):
         return 0.0
-    return (i * COST_PER_1M["input"] + o * COST_PER_1M["output"]) / 1_000_000
+
+
+def _env_float(name: str) -> float:
+    return _num(os.environ.get(name, "").strip().replace(",", "."))
+
+
+def estimate_cost(s: dict) -> float:
+    """Oturumun tahmini USD maliyeti: Gemini Live + özet/öğrenme (+ telefon dakikası).
+
+    Telefon dakikası yalnızca NETGSM_TRY_PER_MIN ve USD_TRY ortam değişkenleri doluysa eklenir.
+    """
+    p = COST_PER_1M
+    in_audio, out_audio = _num(s.get("input_audio_tokens")), _num(s.get("output_audio_tokens"))
+    in_text = max(0.0, _num(s.get("input_tokens")) - in_audio)
+    out_text = max(0.0, _num(s.get("output_tokens")) - out_audio)
+    usd = (in_text * p["live_in_text"] + in_audio * p["live_in_audio"]
+           + out_text * p["live_out_text"] + out_audio * p["live_out_audio"]
+           + _num(s.get("aux_input_tokens")) * p["aux_in"]
+           + _num(s.get("aux_output_tokens")) * p["aux_out"]) / 1_000_000
+    per_min, rate = _env_float("NETGSM_TRY_PER_MIN"), _env_float("USD_TRY")
+    if per_min and rate and str(s.get("origin") or "").startswith("tel:"):
+        usd += _num(s.get("duration_s")) / 60 * per_min / rate
+    return usd
+
+
+def _fmt_cost(usd: float) -> str:
+    """USD_TRY tanımlıysa TL, değilse USD gösterir."""
+    rate = _env_float("USD_TRY")
+    return f"₺{usd * rate:.2f}" if rate else f"${usd:.4f}"
 
 
 _REASON_LABELS = {
@@ -311,8 +342,10 @@ def admin_list(request: Request) -> Response:
         options.append(f'<option value="{_e(a)}"{sel}>{_e(a)}</option>')
 
     trs = []
+    page_total = 0.0
     for r in rows:
-        cost = estimate_cost(r.get("input_tokens"), r.get("output_tokens"))
+        cost = estimate_cost(r)
+        page_total += cost
         href = "/admin/sessions/" + _e(r.get("id"))
         trs.append(
             "<tr>"
@@ -321,11 +354,14 @@ def admin_list(request: Request) -> Response:
             f"<td>{_e(_fmt_duration(r.get('duration_s')))}</td>"
             f"<td>{_e(_fmt_reason(r.get('end_reason')))}</td>"
             f'<td class="num">{int(r.get("input_tokens") or 0):,} / {int(r.get("output_tokens") or 0):,}</td>'
-            f'<td class="num">${cost:.4f}</td>'
+            f'<td class="num">{_fmt_cost(cost)}</td>'
             "</tr>"
         )
     if not trs:
         trs.append('<tr><td colspan="6" class="muted">Henüz oturum yok.</td></tr>')
+    else:
+        trs.append(f'<tr><td colspan="5"><b>Bu sayfanın toplamı</b></td>'
+                   f'<td class="num"><b>{_fmt_cost(page_total)}</b></td></tr>')
 
     def _link(p: int) -> str:
         q: dict[str, Any] = {"page": p}
@@ -350,7 +386,7 @@ def admin_list(request: Request) -> Response:
 <th>Token (girdi / çıktı)</th><th>Tahmini maliyet</th></tr></thead>
 <tbody>{''.join(trs)}</tbody></table></div>
 <div class="pager">{prev_html}<span class="muted">{_e(total_html)}</span>{next_html}</div>
-<p class="muted">Maliyet tahminidir (doğrulanmamış birim fiyatlar, USD).</p>"""
+<p class="muted">Maliyet tahminidir: Gemini Live (ses/metin ayrı) + özet/öğrenme + telefon dakikası (NETGSM_TRY_PER_MIN ve USD_TRY girildiyse).</p>"""
     return _page("Oturumlar", body)
 
 
@@ -367,7 +403,7 @@ def admin_detail(request: Request, session_id: str) -> Response:
         return _page("Bulunamadı", '<p class="card">Oturum bulunamadı. <a href="/admin">Listeye dön</a></p>',
                      status_code=404)
 
-    cost = estimate_cost(s.get("input_tokens"), s.get("output_tokens"))
+    cost = estimate_cost(s)
     summary = s.get("summary") or ""
     summary_html = (f'<div class="card summary">{_e(summary)}</div>' if summary
                     else '<p class="muted">Özet henüz yok.</p>')
@@ -406,7 +442,7 @@ def admin_detail(request: Request, session_id: str) -> Response:
   <div><b>Kaynak (origin)</b>{_e(s.get('origin') or '—')}</div>
   <div><b>Token (girdi / çıktı)</b>{int(s.get('input_tokens') or 0):,} / {int(s.get('output_tokens') or 0):,}</div>
   <div><b>Ses (girdi / çıktı)</b>{float(s.get('audio_in_s') or 0):.1f} sn / {float(s.get('audio_out_s') or 0):.1f} sn</div>
-  <div><b>Tahmini maliyet</b>${cost:.4f}</div>
+  <div><b>Tahmini maliyet</b>{_fmt_cost(cost)}</div>
 </div>
 <h2>Özet</h2>
 {summary_html}
@@ -430,7 +466,7 @@ def admin_api_sessions(request: Request) -> Response:
     offset = _int_param(request, "offset", 0, 0, 10_000_000)
     rows = store.list_sessions(agent_id=agent, limit=limit, offset=offset)
     for r in rows:
-        r["estimated_cost_usd"] = round(estimate_cost(r.get("input_tokens"), r.get("output_tokens")), 6)
+        r["estimated_cost_usd"] = round(estimate_cost(r), 6)
     total = store.count_sessions(agent) if hasattr(store, "count_sessions") else None
     return JSONResponse(
         {"items": rows, "total": total, "limit": limit, "offset": offset},

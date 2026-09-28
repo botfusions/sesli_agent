@@ -78,7 +78,7 @@ class FakeRunner:
                     yield _ev(turn_complete=True)
 
 
-async def fake_summarize(transcript, language="tr"):
+async def fake_summarize(transcript, language="tr", on_usage=None):
     return f"özet: {len(transcript)} satır"
 
 
@@ -349,3 +349,16 @@ def test_date_directive_uses_turkey_date():
     now = live.dt.datetime(2026, 9, 29, 1, 30, tzinfo=live._TR_TZ)
     text = live._date_directive(now)
     assert "2026-09-29" in text and "Salı" in text and "01:30" in text
+
+
+def test_usage_splits_audio_tokens():
+    u = live._Usage()
+    audio = types.ModalityTokenCount(modality=types.MediaModality.AUDIO, token_count=40)
+    text = types.ModalityTokenCount(modality=types.MediaModality.TEXT, token_count=60)
+    u.add_metadata(types.GenerateContentResponseUsageMetadata(
+        prompt_token_count=100, candidates_token_count=30, thoughts_token_count=5,
+        prompt_tokens_details=[audio, text],
+        candidates_tokens_details=[types.ModalityTokenCount(modality=types.MediaModality.AUDIO, token_count=30)]))
+    d = u.as_dict()
+    assert (d["input_tokens"], d["input_audio_tokens"]) == (100, 40)
+    assert (d["output_tokens"], d["output_audio_tokens"]) == (35, 30)

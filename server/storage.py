@@ -20,7 +20,7 @@ from server.redact import redact
 
 __all__ = ["Store", "SCHEMA_VERSION"]
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -38,7 +38,11 @@ CREATE TABLE IF NOT EXISTS sessions (
     output_tokens INTEGER NOT NULL DEFAULT 0,
     audio_in_s    REAL NOT NULL DEFAULT 0,
     audio_out_s   REAL NOT NULL DEFAULT 0,
-    summary       TEXT
+    summary       TEXT,
+    input_audio_tokens  INTEGER NOT NULL DEFAULT 0,
+    output_audio_tokens INTEGER NOT NULL DEFAULT 0,
+    aux_input_tokens    INTEGER NOT NULL DEFAULT 0,
+    aux_output_tokens   INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS transcripts (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,9 +64,10 @@ CREATE INDEX IF NOT EXISTS idx_transcripts_session ON transcripts(session_id, id
 CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, id);
 """
 
+_V2_COLS = ("input_audio_tokens", "output_audio_tokens", "aux_input_tokens", "aux_output_tokens")
 _SESSION_COLS = (
     "id, agent_id, origin, started_at, ended_at, end_reason, duration_s, "
-    "input_tokens, output_tokens, audio_in_s, audio_out_s, summary"
+    "input_tokens, output_tokens, audio_in_s, audio_out_s, summary, " + ", ".join(_V2_COLS)
 )
 
 
@@ -117,7 +122,11 @@ class Store:
             row = self._conn.execute("SELECT MAX(version) AS v FROM schema_version").fetchone()
             if row["v"] is None:
                 self._conn.execute("INSERT INTO schema_version(version) VALUES (?)", (SCHEMA_VERSION,))
-            # İleride göç (migration) adımları burada sürüm karşılaştırmasıyla eklenecek.
+            elif row["v"] < 2:
+                # v2: maliyet için ses/metin token ayrımı ve özet+öğrenme (aux) token'ları
+                for col in _V2_COLS:
+                    self._conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
+                self._conn.execute("UPDATE schema_version SET version = 2")
 
     # ---- yazma -------------------------------------------------------------
 
@@ -155,7 +164,8 @@ class Store:
             self._conn.execute(
                 """UPDATE sessions SET
                        ended_at = ?, end_reason = ?, duration_s = MAX(0, ? - started_at),
-                       input_tokens = ?, output_tokens = ?, audio_in_s = ?, audio_out_s = ?
+                       input_tokens = ?, output_tokens = ?, audio_in_s = ?, audio_out_s = ?,
+                       input_audio_tokens = ?, output_audio_tokens = ?
                    WHERE id = ? AND ended_at IS NULL""",
                 (
                     now,
@@ -165,8 +175,19 @@ class Store:
                     _int(usage.get("output_tokens")),
                     _float(usage.get("audio_in_s")),
                     _float(usage.get("audio_out_s")),
+                    _int(usage.get("input_audio_tokens")),
+                    _int(usage.get("output_audio_tokens")),
                     session_id,
                 ),
+            )
+
+    def add_aux_usage(self, session_id: str, input_tokens: int, output_tokens: int) -> None:
+        """Görüşme sonrası özet/öğrenme model çağrılarının token'larını oturuma ekler."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE sessions SET aux_input_tokens = aux_input_tokens + ?, "
+                "aux_output_tokens = aux_output_tokens + ? WHERE id = ?",
+                (_int(input_tokens), _int(output_tokens), session_id),
             )
 
     def set_summary(self, session_id: str, summary: str) -> None:

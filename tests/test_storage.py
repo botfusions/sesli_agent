@@ -161,3 +161,27 @@ def test_concurrent_writes(store):
         s = store.get_session(sid)
         assert len(s["transcript"]) == 50 and len(s["events"]) == 50
         assert s["end_reason"] == "client_end"
+
+
+def test_migrates_v1_db_and_tracks_aux_usage(tmp_path):
+    import sqlite3
+    path = tmp_path / "v1.db"
+    c = sqlite3.connect(path)
+    c.executescript(
+        "CREATE TABLE schema_version (version INTEGER NOT NULL); INSERT INTO schema_version VALUES (1);"
+        "CREATE TABLE sessions (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, origin TEXT, started_at REAL NOT NULL,"
+        " ended_at REAL, end_reason TEXT, duration_s REAL, input_tokens INTEGER NOT NULL DEFAULT 0,"
+        " output_tokens INTEGER NOT NULL DEFAULT 0, audio_in_s REAL NOT NULL DEFAULT 0,"
+        " audio_out_s REAL NOT NULL DEFAULT 0, summary TEXT);"
+    )
+    c.close()
+    s = Store(path)
+    assert [r[0] for r in s._conn.execute("SELECT version FROM schema_version")] == [SCHEMA_VERSION]
+    sid = s.create_session("a1", None)
+    s.end_session(sid, "client_end", {"input_tokens": 10, "input_audio_tokens": 7, "output_audio_tokens": 3})
+    s.add_aux_usage(sid, 100, 20)
+    s.add_aux_usage(sid, 1, 2)
+    row = s.get_session(sid)
+    assert (row["input_audio_tokens"], row["output_audio_tokens"]) == (7, 3)
+    assert (row["aux_input_tokens"], row["aux_output_tokens"]) == (101, 22)
+    s.close()

@@ -78,7 +78,7 @@ def test_list_and_detail_with_bearer(make_client, store):
     assert "botfusions-satis" in r.text and "destek" in r.text
     assert f"/admin/sessions/{sid}" in r.text
     assert "Kullanıcı kapattı" in r.text
-    assert "$3.0000" in r.text  # 1M girdi token * COST_PER_1M["input"]
+    assert "$0.7500" in r.text  # 1M metin girdi token * COST_PER_1M["live_in_text"]
     assert "#0E0B15" in r.text and "#A855F7" in r.text
     assert r.headers["cache-control"] == "no-store"
 
@@ -143,7 +143,7 @@ def test_api_json(make_client, store):
     assert data["total"] == 2 and data["limit"] == 50 and data["offset"] == 0
     assert {i["id"] for i in data["items"]} == {sid, other}
     item = next(i for i in data["items"] if i["id"] == sid)
-    assert item["estimated_cost_usd"] == pytest.approx(3.0)
+    assert item["estimated_cost_usd"] == pytest.approx(0.75)
     r = c.get("/admin/api/sessions?agent=destek&limit=1", headers=_auth())
     assert [i["id"] for i in r.json()["items"]] == [other]
     # API ?token= ile yönlendirmesiz çalışır
@@ -169,3 +169,20 @@ def test_store_missing_503(monkeypatch):
     c = TestClient(app)
     assert c.get("/admin", headers=_auth()).status_code == 503
     assert c.get("/admin/api/sessions", headers=_auth()).status_code == 503
+
+
+def test_estimate_cost_modalities_aux_and_phone(monkeypatch):
+    from server.admin import estimate_cost, _fmt_cost
+    monkeypatch.delenv("NETGSM_TRY_PER_MIN", raising=False)
+    monkeypatch.delenv("USD_TRY", raising=False)
+    s = {"input_tokens": 3_000_000, "input_audio_tokens": 1_000_000,
+         "output_tokens": 1_000_000, "output_audio_tokens": 1_000_000,
+         "aux_input_tokens": 1_000_000, "aux_output_tokens": 1_000_000,
+         "origin": "tel:0532***|abcd1234", "duration_s": 120}
+    # 2M metin*0.75 + 1M ses*3 + 1M ses çıktı*12 + aux 0.75 + 3.75
+    assert round(estimate_cost(s), 6) == 21.0
+    monkeypatch.setenv("NETGSM_TRY_PER_MIN", "0,50")
+    monkeypatch.setenv("USD_TRY", "40")
+    assert round(estimate_cost(s), 6) == 21.025  # 2 dk * 0.50 TL / 40
+    assert round(estimate_cost(dict(s, origin="https://botfusions.com")), 6) == 21.0
+    assert _fmt_cost(1.0) == "₺40.00"

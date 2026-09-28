@@ -203,22 +203,37 @@ def build_llm_agent(agent: AgentConfig, model: str, adk_tools: list,
 # --- Ana işleyici -------------------------------------------------------------
 
 
+def _audio_tokens(details: Any) -> int:
+    return sum(int(getattr(d, "token_count", 0) or 0) for d in details or []
+               if "AUDIO" in str(getattr(d, "modality", "")).upper())
+
+
 class _Usage:
     def __init__(self) -> None:
         self.input_tokens = 0
         self.output_tokens = 0
+        self.input_audio_tokens = 0
+        self.output_audio_tokens = 0
         self.audio_in_bytes = 0
         self.audio_out_bytes = 0
 
     def add_metadata(self, meta: Any) -> None:
         # Live API her tur için kullanım bildirir; turlar toplanır
         self.input_tokens += int(getattr(meta, "prompt_token_count", 0) or 0)
+        # Düşünme token'ları çıktı (metin) fiyatından faturalanır
         self.output_tokens += int(getattr(meta, "candidates_token_count", 0) or 0)
+        self.output_tokens += int(getattr(meta, "thoughts_token_count", 0) or 0)
+        # Ses token'ları metinden pahalı: modaliteye göre ayrı sayılır (maliyet hesabı)
+        self.input_audio_tokens += _audio_tokens(getattr(meta, "prompt_tokens_details", None))
+        self.output_audio_tokens += _audio_tokens(getattr(meta, "candidates_tokens_details", None)
+                                                  or getattr(meta, "response_tokens_details", None))
 
     def as_dict(self) -> dict:
         return {
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
+            "input_audio_tokens": self.input_audio_tokens,
+            "output_audio_tokens": self.output_audio_tokens,
             "audio_in_s": round(self.audio_in_bytes / INPUT_BYTES_PER_S, 2),
             "audio_out_s": round(self.audio_out_bytes / OUTPUT_BYTES_PER_S, 2),
         }
@@ -580,15 +595,26 @@ async def _finish(chan, store, agent, session_id, reason, usage: _Usage, transcr
         _background_tasks.add(task)
         task.add_done_callback(_background_tasks.discard)
         if agent.learning.enabled:
-            task = asyncio.create_task(learning.reflect(agent.id, list(transcript), agent.learning.max_items))
+            task = asyncio.create_task(learning.reflect(agent.id, list(transcript), agent.learning.max_items,
+                                                        on_usage=_aux_usage(store, session_id)))
             _background_tasks.add(task)
             task.add_done_callback(_background_tasks.discard)
+
+
+def _aux_usage(store, session_id: str):
+    def cb(input_tokens: int, output_tokens: int) -> None:
+        try:
+            store.add_aux_usage(session_id, input_tokens, output_tokens)
+        except Exception:
+            logger.exception("add_aux_usage failed")
+    return cb
 
 
 async def _summarize_later(store, session_id: str, transcript: list[dict], language: str) -> None:
     """Oturum özeti arka planda üretilir; hata yutulur."""
     try:
-        text = await summary.summarize(transcript, language.split("-")[0] or "tr")
+        text = await summary.summarize(transcript, language.split("-")[0] or "tr",
+                                       on_usage=_aux_usage(store, session_id))
         if text:
             await asyncio.to_thread(store.set_summary, session_id, text)
             # Bu oturumda CRM'e aday yazıldıysa özeti adayın kaydına ekle (notes_column tanımlıysa)

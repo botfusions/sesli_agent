@@ -106,7 +106,8 @@ def load_block(agent_id: str) -> str:
     return "\n".join(parts)
 
 
-async def reflect(agent_id: str, transcript: list[dict], max_items: int = 30) -> None:
+async def reflect(agent_id: str, transcript: list[dict], max_items: int = 30,
+                  on_usage=None) -> None:
     """Görüşmeden ders/hata çıkarıp dosyalara ekler; hata yutulur."""
     try:
         body = summary._format_transcript(transcript)
@@ -130,6 +131,7 @@ async def reflect(agent_id: str, transcript: list[dict], max_items: int = 30) ->
             client.aio.models.generate_content(model=model, contents=body, config=config),
             timeout=summary.TIMEOUT_S,
         )
+        summary.report_usage(resp, on_usage)
         data = json.loads(getattr(resp, "text", None) or "{}")
         for kind in FILES:
             added = await asyncio.to_thread(append, agent_id, kind, _clean(data.get(kind)), max_items)

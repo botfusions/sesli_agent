@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from typing import Any
+from typing import Any, Callable
 
 from server.redact import redact
 
@@ -105,7 +105,17 @@ def _format_transcript(transcript: list[dict]) -> str:
     return joined
 
 
-async def summarize(transcript: list[dict], language: str = "tr") -> str:
+def report_usage(response: Any, on_usage: Callable[[int, int], None] | None) -> None:
+    """Yanıtın token kullanımını (girdi, çıktı+düşünme) maliyet hesabı için bildirir."""
+    meta = getattr(response, "usage_metadata", None)
+    if on_usage is None or meta is None:
+        return
+    out = (getattr(meta, "candidates_token_count", 0) or 0) + (getattr(meta, "thoughts_token_count", 0) or 0)
+    on_usage(int(getattr(meta, "prompt_token_count", 0) or 0), int(out))
+
+
+async def summarize(transcript: list[dict], language: str = "tr",
+                    on_usage: Callable[[int, int], None] | None = None) -> str:
     """Transkriptten 3–5 maddelik özet üretir. Hata/boş → ""."""
     try:
         body = _format_transcript(transcript)
@@ -131,6 +141,7 @@ async def summarize(transcript: list[dict], language: str = "tr") -> str:
             client.aio.models.generate_content(model=model, contents=body, config=config),
             timeout=TIMEOUT_S,
         )
+        report_usage(response, on_usage)
         text = getattr(response, "text", None) or ""
         text = text.strip()
         return redact(text) if text else ""
