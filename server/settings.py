@@ -11,8 +11,8 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
-DEFAULT_LIVE_MODEL = "gemini-2.5-flash-native-audio-preview-09-2025"
-DEFAULT_SUMMARY_MODEL = "gemini-2.5-flash"
+DEFAULT_LIVE_MODEL = "gemini-3.8-live"
+DEFAULT_SUMMARY_MODEL = "gemini-3.8-flash"
 
 
 def _env_bool(name: str, default: bool = False) -> bool:

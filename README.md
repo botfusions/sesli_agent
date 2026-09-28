@@ -4,7 +4,7 @@ Müşteri sitesine **tek satırla** eklenen, Türkçe öncelikli, gerçek zamanl
 Google Gemini Live + Agent Development Kit (ADK) üzerinde çalışır. Her müşteri için kod yazmadan,
 bir YAML dosyasıyla yeni asistan kurulur.
 
-> Durum: MVP. Gerçek Gemini anahtarıyla uçtan uca ses testi henüz yapılmadı (aşağıdaki "İlk çalıştırma" bölümü).
+> Durum: MVP. 28-09-2026'da gerçek anahtarla uçtan uca test edildi (metin girişli sesli sohbet, randevu aracı, kayıt, özet). Mikrofonla gerçek tarayıcı testi henüz yapılmadı.
 
 ## Neler var?
 - **Widget:** Sağ altta mikrofon düğmesi; sesli konuşma, asistanın sözünü kesme (barge-in), canlı transkript, yazılı mesaj, mobil uyumlu. Mikrofon izni yoksa yazılı moda düşer.
@@ -54,7 +54,15 @@ uvicorn server.app:app --port 8090
 - Demo sayfası: http://localhost:8090/demo/botfusions-satis → sağ alttaki düğmeye basıp konuşun.
 - Yönetim: http://localhost:8090/admin?token=ADMIN_TOKEN_DEĞERİ
 
-**Model adı:** `LIVE_MODEL` varsayılanı `gemini-2.5-flash-native-audio-preview-09-2025`. Hesabınızda bu ad yoksa demo sayfasında hata görürsünüz; [model listesinden](https://ai.google.dev/gemini-api/docs/models) erişebildiğiniz canlı ses modelinin adını `.env`'ye yazın.
+**Modeller (28-09-2026'da gerçek anahtarla test edildi):**
+
+| Kullanım | Model | AI Studio | Vertex (us-central1) | İlk ses gecikmesi |
+|---|---|---|---|---|
+| Canlı ses (varsayılan) | `gemini-3.8-live` | ✅ | ✅ | ~1,3 sn |
+| Canlı ses (yedek) | `gemini-2.5-flash-native-audio-preview-09-2025` / Vertex: `gemini-live-2.5-flash-native-audio` | ✅ | ✅ | ~1,5–2,5 sn |
+| Özet | `gemini-3.8-flash` | ✅ | ✅ (yalnızca `global` bölge → `SUMMARY_LOCATION=global`) | — |
+
+**Vertex AI ile (servis hesabı):** `.env`'de `GOOGLE_GENAI_USE_VERTEXAI=true`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION=us-central1` ve `GOOGLE_APPLICATION_CREDENTIALS=/yol/servis-hesabi.json` verin. Anahtarın hangi API'lere izinli olduğu önemlidir: Vertex *express* modunda kullanılan anahtarlar metinde çalışıp canlı seste "Invalid resource field value" hatası verebilir. Canlı ses için Gemini API'ye (AI Studio) izinli bir anahtar ya da servis hesabı kullanın.
 
 ## Docker
 ```bash
@@ -95,7 +103,8 @@ bash tests/widget/run.sh        # widget: Playwright + sahte sunucu (Chromium ge
 ```
 
 ## Bilinen sınırlar ve riskler
-- **Gerçek anahtarla denenmedi:** model adı, token sayımının doğruluğu (birikimli olabilir), araç çalışırken konuşma (NON_BLOCKING) ve karşılama cümlesinin birebir söylenmesi ilk canlı testte kontrol edilmeli.
+- **Araç sonucu beklenmeden konuşma:** Test görüşmesinde asistan `book_demo` sonucu gelmeden "talebinizi iletiyorum" dedi (NON_BLOCKING). Kesin onay gereken araçlarda YAML'da `speak_while_running: false` kullanın.
+- **Token sayımı:** birikimli sayılıyor olabilir; kendi faturanızla karşılaştırın.
 - **Maliyet:** `/admin`'deki maliyet `server/admin.py` üstündeki `COST_PER_1M` sabitinden tahmindir; kendi faturanızla güncelleyin.
 - **Tek sunucu:** Çağrı sayaçları ve ADK oturumları bellekte; birden fazla worker/sunucu için paylaşılan depo gerekir.
 - **Kötüye kullanım:** IP başına oturum sınırı yok; günlük kota maliyeti sınırlar ama tek kullanıcı kotayı tüketebilir.

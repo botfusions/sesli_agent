@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 
 TIMEOUT_S = 20.0
 MAX_TRANSCRIPT_CHARS = 30_000
-DEFAULT_SUMMARY_MODEL = "gemini-2.5-flash"
+DEFAULT_SUMMARY_MODEL = "gemini-3.8-flash"
 
 _PROMPT_TR = (
     "Aşağıda bir müşteri ile sesli asistan arasındaki görüşmenin transkripti var. "
@@ -76,7 +76,9 @@ def _make_client():
         return genai.Client(
             vertexai=True,
             project=_setting("GOOGLE_CLOUD_PROJECT"),
-            location=_setting("GOOGLE_CLOUD_LOCATION", "us-central1"),
+            # Metin modelleri (ör. gemini-3.8-flash) Vertex'te çoğu zaman yalnızca "global" bölgededir;
+            # canlı ses modeli ise bölgesel (us-central1). Bu yüzden özet için ayrı bölge ayarı var.
+            location=os.environ.get("SUMMARY_LOCATION") or "global",
             http_options=http_options,
         )
     api_key = _setting("GEMINI_API_KEY") or _setting("GOOGLE_API_KEY")
@@ -121,7 +123,8 @@ async def summarize(transcript: list[dict], language: str = "tr") -> str:
         config = types.GenerateContentConfig(
             system_instruction=instruction,
             temperature=0.2,
-            max_output_tokens=600,
+            # 3.x modelleri çıktı bütçesinin bir kısmını "düşünme"ye harcar; 600'de özet yarıda kesiliyordu
+            max_output_tokens=2048,
         )
         model = _setting("SUMMARY_MODEL", DEFAULT_SUMMARY_MODEL)
         response = await asyncio.wait_for(

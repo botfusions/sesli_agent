@@ -49,8 +49,9 @@ imzaya göre import eder (dosya henüz yoksa testte sahte/mock kullanır).
 |---|---|---|
 | `GEMINI_API_KEY` | — | Google AI Studio anahtarı (Vertex kullanılmıyorsa zorunlu) |
 | `GOOGLE_GENAI_USE_VERTEXAI` | `false` | `true` ise Vertex AI (+ `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`) |
-| `LIVE_MODEL` | `gemini-2.5-flash-native-audio-preview-09-2025` | Canlı ses modeli; asistan YAML'ı `model` ile ezebilir. Gerçek erişilebilir ad anahtarla doğrulanacak. |
-| `SUMMARY_MODEL` | `gemini-2.5-flash` | Özet için metin modeli |
+| `LIVE_MODEL` | `gemini-3.8-live` | Canlı ses modeli; asistan YAML'ı `model` ile ezebilir (28-09-2026'da doğrulandı). |
+| `SUMMARY_MODEL` | `gemini-3.8-flash` | Özet için metin modeli |
+| `SUMMARY_LOCATION` | `global` | Vertex'te özet modelinin bölgesi |
 | `AGENTS_DIR` | `./agents` | YAML klasörü |
 | `DATABASE_PATH` | `./data/voice-agent.db` | SQLite dosyası |
 | `ADMIN_TOKEN` | — | `/admin` için Bearer/çerez token; boşsa admin kapalı |
