@@ -72,7 +72,7 @@ tools:
     method: POST
     timeout_s: 8
     secret_env: BOOK_DEMO_SECRET
-    speak_while_running: true
+    speak_while_running: false  # randevu kesin onay ister: sonuç gelmeden "iletiyorum" demesin
 
 allowed_origins:
   - https://botfusions.com

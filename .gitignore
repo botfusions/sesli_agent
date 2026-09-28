@@ -7,3 +7,8 @@ data/
 .pytest_cache/
 node_modules/
 tests/widget/*.png
+
+# Gizli dosyalar (servis hesabı anahtarları vb.)
+secrets/
+*service-account*.json
+*-credentials.json
