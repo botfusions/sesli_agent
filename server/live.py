@@ -3,6 +3,11 @@
 Protokol SPEC.md'deki "WebSocket protokolü" bölümündedir. Akış:
 origin kontrolü → `start` bekle → günlük limit → store.create_session → ADK ajanı + run_live
 → iki eşzamanlı görev (istemci→model, model→istemci) + süre sayacı → kapanış, kayıt, özet.
+
+Oturum çekirdeği (`start_session` / `_run_session`) kanaldan bağımsızdır: widget WebSocket'i
+ve telefon (Asterisk AudioSocket, bkz. telephony_asterisk.py) aynı çekirdeği kullanır.
+Kanal arayüzü: `send_json`, `send_bytes`, `error`, `close`, `closed`; istemci→model yönü
+dışarıdan verilen `upstream` coroutine'idir.
 """
 
 from __future__ import annotations
@@ -11,7 +16,8 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Awaitable, Callable, Protocol
 
 from fastapi import WebSocket
 from google.adk.agents import LlmAgent
@@ -54,6 +60,20 @@ ERRORS: dict[str, str] = {
 
 # Arka plan özet görevlerinin çöp toplayıcıya gitmemesi için referans tutulur
 _background_tasks: set[asyncio.Task] = set()
+
+
+class Channel(Protocol):
+    """Oturum çekirdeğinin kullandığı kanal arayüzü (widget WebSocket'i, telefon hattı)."""
+
+    closed: bool
+
+    async def send_json(self, payload: dict) -> None: ...
+
+    async def send_bytes(self, data: bytes) -> None: ...
+
+    async def error(self, code: str, message: str | None = None) -> None: ...
+
+    async def close(self, code: int = 1000) -> None: ...
 
 
 class _Channel:
@@ -112,12 +132,14 @@ def _language_directive(language: str) -> str:
     )
 
 
-def build_instruction(agent: AgentConfig) -> str:
-    """Sistem talimatı = instructions + knowledge + dil talimatı."""
+def build_instruction(agent: AgentConfig, extra_instruction: str | None = None) -> str:
+    """Sistem talimatı = instructions + knowledge + dil talimatı (+ kanala özel ek talimat)."""
     parts = [agent.instructions.strip()]
     if agent.knowledge and agent.knowledge.strip():
         parts.append("## Bilgi (yalnızca buna dayanarak yanıt ver)\n" + agent.knowledge.strip())
     parts.append(_language_directive(agent.language))
+    if extra_instruction and extra_instruction.strip():
+        parts.append(extra_instruction.strip())
     return "\n\n".join(parts)
 
 
@@ -143,8 +165,9 @@ def build_run_config(agent: AgentConfig, model: str) -> RunConfig:
     return RunConfig(**kwargs)
 
 
-def build_llm_agent(agent: AgentConfig, model: str, adk_tools: list) -> LlmAgent:
-    instruction_text = build_instruction(agent)
+def build_llm_agent(agent: AgentConfig, model: str, adk_tools: list,
+                    extra_instruction: str | None = None) -> LlmAgent:
+    instruction_text = build_instruction(agent, extra_instruction)
 
     # Çağrılabilir talimat: ADK'nın {değişken} şablon enjeksiyonunu atlar
     # (bilgi metnindeki süslü parantezler hataya yol açmasın).
@@ -222,107 +245,34 @@ async def handle_live(ws: WebSocket, agent_id: str, store, settings) -> None:
         await chan.close(POLICY_VIOLATION)
         return
 
-    if not settings.model_configured:
-        logger.error("Live model credentials missing (GEMINI_API_KEY / Vertex settings)")
-        await chan.error("server_not_configured")
-        await chan.close(1011)
-        return
-
-    try:
-        usage_today = await asyncio.to_thread(store.usage_today, agent.id)
-    except Exception:
-        logger.exception("usage_today failed")
-        await chan.error("storage_error")
-        await chan.close(1011)
-        return
-    reason = limits.evaluate_daily(usage_today, agent)
-    if reason:
-        await chan.send_json({"type": "limit", "reason": reason})
-        await chan.close(1000)
-        return
-    budget_s, budget_reason = limits.session_budget(usage_today, agent)
-
-    try:
-        session_id = await asyncio.to_thread(store.create_session, agent.id, origin)
-    except Exception:
-        logger.exception("create_session failed")
-        await chan.error("storage_error")
-        await chan.close(1011)
-        return
-
-    await _run_session(chan, agent, store, settings, session_id, budget_s, budget_reason)
+    await start_session(
+        chan, agent, store, settings,
+        origin=origin,
+        upstream=_widget_upstream(ws, chan),
+        greeting=agent.greeting,
+    )
 
 
-async def _run_session(
-    chan: _Channel,
-    agent: AgentConfig,
-    store,
-    settings,
-    session_id: str,
-    budget_s: float,
-    budget_reason: str,
-) -> None:
-    ws = chan.ws
-    usage = _Usage()
-    transcript: list[dict] = []
-    end_reason = "unknown"
-    started = time.monotonic()
-    queue = LiveRequestQueue()
+@dataclass
+class SessionIO:
+    """Upstream coroutine'ine verilen oturum bağlamı."""
 
-    async def record_event(kind: str, payload: dict) -> None:
-        try:
-            await asyncio.to_thread(store.add_event, session_id, kind, payload)
-        except Exception:
-            logger.exception("add_event failed kind=%s", kind)
+    session_id: str
+    queue: LiveRequestQueue
+    usage: _Usage
+    record_transcript: Callable[[str, str], Awaitable[None]]
+    record_event: Callable[[str, dict], Awaitable[None]]
 
-    async def record_transcript(role: str, text: str) -> None:
-        transcript.append({"role": role, "text": text})
-        try:
-            await asyncio.to_thread(store.add_transcript, session_id, role, text)
-        except Exception:
-            logger.exception("add_transcript failed")
 
-    async def on_tool_event(event: dict) -> None:
-        payload = {"type": "tool", **{k: v for k, v in event.items() if k != "type"}}
-        await chan.send_json(payload)
-        await record_event("tool", payload)
+# İstemci → model yönü: dönüş değeri oturumun bitiş nedenidir (ör. "client_end", "caller_hangup").
+Upstream = Callable[[SessionIO], Awaitable[str]]
 
-    try:
-        model = agent.model or settings.live_model
-        adk_tools = tools.build_adk_tools(agent, on_tool_event, session_id=session_id)
-        llm_agent = build_llm_agent(agent, model, adk_tools)
-        session_service = InMemorySessionService()
-        # ADK oturum kimliği = kayıt oturum kimliği (araçlar tool_context üzerinden okuyabilir)
-        await session_service.create_session(
-            app_name=APP_NAME,
-            user_id=agent.id,
-            session_id=session_id,
-            state={"agent_id": agent.id, "session_id": session_id},
-        )
-        runner = Runner(app_name=APP_NAME, agent=llm_agent, session_service=session_service)
-        run_config = build_run_config(agent, model)
-    except Exception:
-        logger.exception("Failed to build live agent for %s", agent.id)
-        await chan.error("internal_error")
-        await record_event("error", {"code": "internal_error", "stage": "setup"})
-        await _finish(chan, store, agent, session_id, "error", usage, transcript, 1011)
-        return
 
-    await chan.send_json({"type": "ready", "session_id": session_id, "agent": config.public_view(agent)})
+def _widget_upstream(ws: WebSocket, chan: _Channel) -> Upstream:
+    """Widget WebSocket'inden gelen ses/metin çerçevelerini modele ileten upstream."""
 
-    if agent.greeting:
-        queue.send_content(
-            types.Content(
-                role="user",
-                parts=[types.Part(text=(
-                    "[Sistem] Görüşme yeni başladı. Kullanıcıyı şu cümleyle selamla ve "
-                    f"sonra onu dinle: \"{agent.greeting}\""
-                ))],
-            )
-        )
-
-    async def upstream() -> str:
-        """İstemci → model."""
+    async def upstream(io: SessionIO) -> str:
+        queue, usage = io.queue, io.usage
         while True:
             msg = await ws.receive()
             mtype = msg.get("type")
@@ -369,9 +319,144 @@ async def _run_session(
                     continue
                 user_text = user_text.strip()
                 queue.send_content(types.Content(role="user", parts=[types.Part(text=user_text)]))
-                await record_transcript("user", user_text)
+                await io.record_transcript("user", user_text)
                 continue
             await chan.error("bad_message")
+
+    return upstream
+
+
+async def start_session(
+    chan: Channel,
+    agent: AgentConfig,
+    store,
+    settings,
+    *,
+    origin: str | None,
+    upstream: Upstream,
+    greeting: str | None,
+    extra_instruction: str | None = None,
+    on_session_created: Callable[[str], None] | None = None,
+) -> str | None:
+    """Kanaldan bağımsız oturum açılışı: model yapılandırması → günlük limit → kayıt → canlı oturum.
+
+    Oturum açılamazsa kanal kapatılır ve None döner; aksi halde oturum bitene kadar bekler
+    ve kayıt oturum kimliğini döndürür.
+    """
+    if not settings.model_configured:
+        logger.error("Live model credentials missing (GEMINI_API_KEY / Vertex settings)")
+        await chan.error("server_not_configured")
+        await chan.close(1011)
+        return None
+
+    try:
+        usage_today = await asyncio.to_thread(store.usage_today, agent.id)
+    except Exception:
+        logger.exception("usage_today failed")
+        await chan.error("storage_error")
+        await chan.close(1011)
+        return None
+    reason = limits.evaluate_daily(usage_today, agent)
+    if reason:
+        await chan.send_json({"type": "limit", "reason": reason})
+        await chan.close(1000)
+        return None
+    budget_s, budget_reason = limits.session_budget(usage_today, agent)
+
+    try:
+        session_id = await asyncio.to_thread(store.create_session, agent.id, origin)
+    except Exception:
+        logger.exception("create_session failed")
+        await chan.error("storage_error")
+        await chan.close(1011)
+        return None
+
+    if on_session_created is not None:
+        try:
+            on_session_created(session_id)
+        except Exception:
+            logger.exception("on_session_created callback failed")
+
+    await _run_session(
+        chan, agent, store, settings, session_id, budget_s, budget_reason,
+        upstream=upstream, greeting=greeting, extra_instruction=extra_instruction,
+    )
+    return session_id
+
+
+async def _run_session(
+    chan: Channel,
+    agent: AgentConfig,
+    store,
+    settings,
+    session_id: str,
+    budget_s: float,
+    budget_reason: str,
+    *,
+    upstream: Upstream,
+    greeting: str | None,
+    extra_instruction: str | None = None,
+) -> None:
+    usage = _Usage()
+    transcript: list[dict] = []
+    end_reason = "unknown"
+    started = time.monotonic()
+    queue = LiveRequestQueue()
+
+    async def record_event(kind: str, payload: dict) -> None:
+        try:
+            await asyncio.to_thread(store.add_event, session_id, kind, payload)
+        except Exception:
+            logger.exception("add_event failed kind=%s", kind)
+
+    async def record_transcript(role: str, text: str) -> None:
+        transcript.append({"role": role, "text": text})
+        try:
+            await asyncio.to_thread(store.add_transcript, session_id, role, text)
+        except Exception:
+            logger.exception("add_transcript failed")
+
+    async def on_tool_event(event: dict) -> None:
+        payload = {"type": "tool", **{k: v for k, v in event.items() if k != "type"}}
+        await chan.send_json(payload)
+        await record_event("tool", payload)
+
+    try:
+        model = agent.model or settings.live_model
+        adk_tools = tools.build_adk_tools(agent, on_tool_event, session_id=session_id)
+        llm_agent = build_llm_agent(agent, model, adk_tools, extra_instruction)
+        session_service = InMemorySessionService()
+        # ADK oturum kimliği = kayıt oturum kimliği (araçlar tool_context üzerinden okuyabilir)
+        await session_service.create_session(
+            app_name=APP_NAME,
+            user_id=agent.id,
+            session_id=session_id,
+            state={"agent_id": agent.id, "session_id": session_id},
+        )
+        runner = Runner(app_name=APP_NAME, agent=llm_agent, session_service=session_service)
+        run_config = build_run_config(agent, model)
+    except Exception:
+        logger.exception("Failed to build live agent for %s", agent.id)
+        await chan.error("internal_error")
+        await record_event("error", {"code": "internal_error", "stage": "setup"})
+        await _finish(chan, store, agent, session_id, "error", usage, transcript, 1011)
+        return
+
+    await chan.send_json({"type": "ready", "session_id": session_id, "agent": config.public_view(agent)})
+
+    if greeting:
+        queue.send_content(
+            types.Content(
+                role="user",
+                parts=[types.Part(text=(
+                    "[Sistem] Görüşme yeni başladı. Kullanıcıyı şu cümleyle selamla ve "
+                    f"sonra onu dinle: \"{greeting}\""
+                ))],
+            )
+        )
+
+    io = SessionIO(session_id=session_id, queue=queue, usage=usage,
+                   record_transcript=record_transcript, record_event=record_event)
 
     buffers: dict[str, str] = {"user": "", "agent": ""}
 
@@ -426,14 +511,15 @@ async def _run_session(
         return budget_reason
 
     tasks = {
-        asyncio.create_task(upstream(), name="upstream"),
+        asyncio.create_task(upstream(io), name="upstream"),
         asyncio.create_task(downstream(), name="downstream"),
         asyncio.create_task(timer(), name="timer"),
     }
     close_code = 1000
     try:
         done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-        task = next(iter(done))
+        # Aynı anda birden çok görev bittiyse istemci tarafının nedeni (ör. caller_hangup) önceliklidir
+        task = next((t for t in done if t.get_name() == "upstream"), next(iter(done)))
         try:
             end_reason = task.result()
         except Exception:

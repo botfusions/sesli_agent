@@ -1,0 +1,30 @@
+; Yerel test softphone'u (MicroSIP/Zoiper) — ŞABLON
+; Yalnızca SOFTPHONE_PASSWORD verildiğinde entrypoint.sh üretir.
+; Kullanıcı: 1001 · Şifre: SOFTPHONE_PASSWORD · Aranacak numara: 100
+
+[1001]
+type = auth
+auth_type = userpass
+username = 1001
+password = ${SOFTPHONE_PASSWORD}
+
+[1001]
+type = aor
+max_contacts = 1
+remove_existing = yes
+qualify_frequency = 30
+
+[1001]
+type = endpoint
+transport = transport-udp
+context = from-softphone
+disallow = all
+allow = alaw,ulaw
+auth = 1001
+aors = 1001
+callerid = "Test Softphone" <1001>
+direct_media = no
+rtp_symmetric = yes
+force_rport = yes
+rewrite_contact = yes
+dtmf_mode = rfc4733

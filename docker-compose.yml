@@ -4,7 +4,35 @@ services:
     env_file: .env
     ports:
       - "8090:8090"
+    # AudioSocket (telefon sesi) yalnızca iç Docker ağında; dışarıya YAYINLANMAZ.
+    expose:
+      - "9092"
     volumes:
       - ./data:/app/data        # SQLite kayıtları
       - ./agents:/app/agents:ro # asistan yapılandırmaları (yeniden imaj almadan değiştirilebilir)
+    restart: unless-stopped
+
+  # Telefon hattı: Netgsm SIP → Asterisk → AudioSocket → voice-agent
+  # Yalnızca "docker compose --profile telephony up -d --build" ile açılır.
+  asterisk:
+    profiles: ["telephony"]
+    build: ./asterisk
+    depends_on:
+      - voice-agent
+    # .env'in tamamı (Gemini anahtarı vb.) verilmez; yalnızca gerekenler.
+    environment:
+      TELEPHONY_SECRET: ${TELEPHONY_SECRET:-}
+      TELEPHONY_AGENT: ${TELEPHONY_AGENT:-}
+      TELEPHONY_API_URL: http://voice-agent:${PORT:-8090}/telephony/asterisk/call
+      AUDIOSOCKET_TARGET: voice-agent:${AUDIOSOCKET_PORT:-9092}
+      NETGSM_SIP_USER: ${NETGSM_SIP_USER:-}
+      NETGSM_SIP_PASSWORD: ${NETGSM_SIP_PASSWORD:-}
+      NETGSM_SIP_SERVER: ${NETGSM_SIP_SERVER:-}
+      EXTERNAL_IP: ${EXTERNAL_IP:-}
+      RTP_START: ${RTP_START:-10000}
+      RTP_END: ${RTP_END:-10100}
+      SOFTPHONE_PASSWORD: ${SOFTPHONE_PASSWORD:-}
+    ports:
+      - "5060:5060/udp"
+      - "${RTP_START:-10000}-${RTP_END:-10100}:${RTP_START:-10000}-${RTP_END:-10100}/udp"
     restart: unless-stopped

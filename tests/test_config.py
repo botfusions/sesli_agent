@@ -148,3 +148,28 @@ def test_repo_agent_yaml_is_valid():
     assert tool.type == "supabase_crm"
     assert tool.speak_while_running is False
     assert {"name", "email", "phone", "preferred_time"} <= set(tool.parameters)
+
+
+def test_telephony_defaults_and_validation(tmp_path):
+    a = make_agent()
+    assert a.telephony.enabled is False
+    assert a.telephony.greeting is None and a.telephony.instructions is None
+    assert a.telephony.max_daily_calls_per_caller == 5
+    t = make_agent(telephony={"enabled": True, "greeting": "Alo", "max_daily_calls_per_caller": 0,
+                              "instructions": "Kısa konuş."}).telephony
+    assert (t.enabled, t.greeting, t.max_daily_calls_per_caller, t.instructions) == (True, "Alo", 0, "Kısa konuş.")
+    with pytest.raises(ValidationError):
+        make_agent(telephony={"max_daily_calls_per_caller": -1})
+    with pytest.raises(ValidationError):
+        make_agent(telephony={"enabeld": True})
+    # telephony bölümü olmayan YAML değişmeden yüklenir; public_view'a sızmaz
+    (tmp_path / "birinci.yaml").write_text(MINIMAL.format(id="birinci"), encoding="utf-8")
+    assert load_agents(tmp_path)["birinci"].telephony.enabled is False
+    assert "telephony" not in public_view(make_agent(telephony={"enabled": True}))
+
+
+def test_repo_agent_telephony():
+    a = load_agents(ROOT / "agents")["botfusions-satis"]
+    assert a.telephony.enabled is True
+    assert a.telephony.max_daily_calls_per_caller == 5
+    assert a.telephony.greeting.startswith("Merhaba, Botfusions'a hoş geldiniz. Ben yapay zekâ asistanıyım;")

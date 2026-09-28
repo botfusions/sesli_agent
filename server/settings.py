@@ -1,7 +1,7 @@
 """Ortam değişkenlerinden okunan sunucu ayarları.
 
 pydantic-settings kullanılmaz; os.environ + dataclass yeterlidir.
-Gizli değerler (GEMINI_API_KEY, ADMIN_TOKEN) repr/log çıktısında görünmez.
+Gizli değerler (GEMINI_API_KEY, ADMIN_TOKEN, TELEPHONY_SECRET) repr/log çıktısında görünmez.
 """
 
 from __future__ import annotations
@@ -44,6 +44,11 @@ class Settings:
     admin_token: str | None = field(default=None, repr=False)
     public_base_url: str = "http://localhost:8090"
     port: int = 8090
+    # Telefon kanalı (Netgsm SIP → Asterisk → AudioSocket → bu sunucu)
+    telephony_enabled: bool = False
+    audiosocket_host: str = "0.0.0.0"
+    audiosocket_port: int = 9092
+    telephony_secret: str | None = field(default=None, repr=False)
 
     @property
     def model_configured(self) -> bool:
@@ -66,6 +71,10 @@ class Settings:
             admin_token=os.environ.get("ADMIN_TOKEN") or None,
             public_base_url=(os.environ.get("PUBLIC_BASE_URL") or "http://localhost:8090").rstrip("/"),
             port=_env_int("PORT", 8090),
+            telephony_enabled=_env_bool("TELEPHONY_ENABLED", False),
+            audiosocket_host=os.environ.get("AUDIOSOCKET_HOST") or "0.0.0.0",
+            audiosocket_port=_env_int("AUDIOSOCKET_PORT", 9092),
+            telephony_secret=os.environ.get("TELEPHONY_SECRET") or None,
         )
 
 

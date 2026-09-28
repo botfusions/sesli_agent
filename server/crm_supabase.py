@@ -32,6 +32,8 @@ _MAX_SESSIONS = 5_000
 
 # Oturum → (araç yapılandırması, aday id) — özetin hangi adaya ekleneceğini bilmek için.
 _session_leads: "OrderedDict[str, tuple[SupabaseCrmTool, str]]" = OrderedDict()
+# Oturum → arayanın normalize telefon numarası (telefon kanalı; model numarayı tekrar sormasın).
+_session_callers: "OrderedDict[str, str]" = OrderedDict()
 
 
 def _normalize_email(v: str | None) -> str | None:
@@ -182,6 +184,22 @@ class SupabaseCrm:
                             json_body={col: new[-20000:]}, prefer="return=minimal")
 
 
+def set_session_caller(session_id: str, phone: str | None) -> None:
+    """Telefon oturumunda arayanın numarasını hatırlar; `book()` args'ta phone yoksa bunu kullanır."""
+    normalized = _normalize_phone(phone)
+    if not normalized:
+        return
+    _session_callers[session_id] = normalized
+    _session_callers.move_to_end(session_id)
+    while len(_session_callers) > _MAX_SESSIONS:
+        _session_callers.popitem(last=False)
+
+
+def forget_session_caller(session_id: str) -> None:
+    """Oturum bitince arayan numarasını bırakır."""
+    _session_callers.pop(session_id, None)
+
+
 def _remember(session_id: str, tool: "SupabaseCrmTool", lead_id: str) -> None:
     _session_leads[session_id] = (tool, lead_id)
     _session_leads.move_to_end(session_id)
@@ -194,7 +212,8 @@ async def book(tool: "SupabaseCrmTool", args: dict, *, session_id: str,
     """Aracın asıl işi. Dönüş: {"ok": True, "data": {...}} | {"ok": False, "error": kod}."""
     name = (args.get("name") or "").strip()
     email = _normalize_email(args.get("email"))
-    phone = _normalize_phone(args.get("phone"))
+    # Telefon kanalında numara zaten biliniyor: model sormadıysa arayanın numarası kullanılır
+    phone = _normalize_phone(args.get("phone")) or _session_callers.get(session_id)
     preferred_time = (args.get("preferred_time") or "").strip()
     note = (args.get("note") or "").strip() or None
     if not name or not preferred_time or not (email or phone):

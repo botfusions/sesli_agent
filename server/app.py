@@ -13,7 +13,7 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from server import config, limits, live
+from server import config, limits, live, telephony_asterisk
 from server.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
@@ -70,13 +70,32 @@ def create_app(settings: Settings | None = None, store=None, agents: dict | None
             s.database_path.parent.mkdir(parents=True, exist_ok=True)
             own_store = Store(s.database_path)
             app.state.store = own_store
+        audiosocket = None
+        if s.telephony_enabled:
+            if not s.telephony_secret:
+                logger.warning("TELEPHONY_ENABLED but TELEPHONY_SECRET is empty; calls cannot be registered")
+            audiosocket = telephony_asterisk.AudioSocketServer(
+                host=s.audiosocket_host, port=s.audiosocket_port,
+                registry=app.state.call_registry, store=app.state.store, settings=s,
+            )
+            try:
+                await audiosocket.start()
+            except OSError:
+                # Port açılamazsa widget çalışmaya devam eder; telefon kanalı devre dışı kalır
+                logger.exception("AudioSocket server could not start on %s:%s", s.audiosocket_host, s.audiosocket_port)
+                audiosocket = None
+        app.state.audiosocket = audiosocket
         try:
             yield
         finally:
+            if audiosocket is not None:
+                await audiosocket.stop()
             if own_store is not None and hasattr(own_store, "close"):
                 own_store.close()
 
     app = FastAPI(title="Botfusions Voice Agent", lifespan=lifespan, docs_url=None, redoc_url=None)
+    # Asterisk'in kaydettiği, AudioSocket bağlantısı bekleyen çağrılar (uuid → asistan, arayan)
+    app.state.call_registry = telephony_asterisk.CallRegistry()
 
     @app.get("/health")
     async def health() -> dict:
@@ -97,6 +116,10 @@ def create_app(settings: Settings | None = None, store=None, agents: dict | None
     @app.websocket("/ws/live/{agent_id}")
     async def ws_live(websocket: WebSocket, agent_id: str) -> None:
         await live.handle_live(websocket, agent_id, websocket.app.state.store, websocket.app.state.settings)
+
+    @app.post("/telephony/asterisk/call")
+    async def telephony_register(request: Request) -> Response:
+        return await telephony_asterisk.handle_register(request)
 
     @app.get("/demo/{agent_id}", response_class=HTMLResponse)
     async def demo(agent_id: str, request: Request) -> HTMLResponse:

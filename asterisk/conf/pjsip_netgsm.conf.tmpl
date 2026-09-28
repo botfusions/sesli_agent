@@ -1,0 +1,57 @@
+; Netgsm SIP trunk — ŞABLON (entrypoint.sh → /etc/asterisk/pjsip_netgsm.conf)
+; Değişkenler: NETGSM_SIP_USER, NETGSM_SIP_PASSWORD, NETGSM_SIP_SERVER
+
+[netgsm-auth]
+type = auth
+auth_type = userpass
+username = ${NETGSM_SIP_USER}
+password = ${NETGSM_SIP_PASSWORD}
+
+; Netgsm'e kayıt (REGISTER): gelen aramalar bu kayıt sayesinde bize yönlenir.
+[netgsm-reg]
+type = registration
+transport = transport-udp
+outbound_auth = netgsm-auth
+server_uri = sip:${NETGSM_SIP_SERVER}
+client_uri = sip:${NETGSM_SIP_USER}@${NETGSM_SIP_SERVER}
+contact_user = ${NETGSM_SIP_USER}
+expiration = 300
+retry_interval = 60
+forbidden_retry_interval = 600
+fatal_retry_interval = 600
+max_retries = 10000
+auth_rejection_permanent = no
+; Gelen INVITE'ı (farklı bir Netgsm IP'sinden gelse bile) bu kayda ve
+; "netgsm" endpoint'ine bağlar.
+line = yes
+endpoint = netgsm
+
+[netgsm]
+type = aor
+contact = sip:${NETGSM_SIP_SERVER}
+qualify_frequency = 60
+
+[netgsm]
+type = endpoint
+transport = transport-udp
+context = from-netgsm
+disallow = all
+allow = alaw,ulaw
+aors = netgsm
+outbound_auth = netgsm-auth
+from_user = ${NETGSM_SIP_USER}
+from_domain = ${NETGSM_SIP_SERVER}
+direct_media = no
+rtp_symmetric = yes
+force_rport = yes
+rewrite_contact = yes
+dtmf_mode = rfc4733
+trust_id_inbound = yes
+send_pai = no
+
+; Netgsm sunucusundan gelen istekleri IP'ye göre bu endpoint'e eşle
+; (alan adı yükleme anında çözülür).
+[netgsm-identify]
+type = identify
+endpoint = netgsm
+match = ${NETGSM_SIP_SERVER}

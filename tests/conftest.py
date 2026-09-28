@@ -50,6 +50,9 @@ class FakeStore:
     def usage_today(self, agent_id):
         return dict(self.usage)
 
+    def count_sessions_today(self, agent_id, origin):
+        return sum(1 for s in self.sessions.values() if s["agent_id"] == agent_id and s["origin"] == origin)
+
 
 def make_agent(**overrides) -> AgentConfig:
     data = {

@@ -121,6 +121,69 @@ X-Botfusions-Signature: sha256=<HMAC-SHA256(secret, "<timestamp>." + gövde)>
 ```
 5 dakikadan eski istekleri reddedin. Örnek YAML'daki `https://example.invalid/...` adresi yer tutucudur; kendi webhook adresinizle değiştirin (n8n webhook'u da olabilir).
 
+## Telefon hattı (Netgsm + Asterisk)
+Müşteri sabit numaranızı (ör. 0850) aradığında aynı asistan telefonda cevap verir. Yalnızca **gelen arama** desteklenir.
+
+```
+Arayan ──► Netgsm (SIP trunk) ──SIP 5060/udp + RTP 10000-10100/udp──► Asterisk (asterisk/ konteyneri)
+                                                                         │ 1) POST /telephony/asterisk/call
+                                                                         │    uuid, caller, agent, token  → "OK"
+                                                                         │ 2) AudioSocket(uuid) TCP 9092, 8 kHz slin
+                                                                         ▼   (yalnızca iç Docker ağı)
+                                                                  voice-agent (FastAPI) ──► Gemini Live
+```
+- Asterisk her aramada rastgele bir UUID üretir, arayanı `TELEPHONY_SECRET` ile voice-agent'a kaydeder; yanıt tam olarak `OK` ise sesi AudioSocket ile bağlar, değilse kapatır. Kayıt 30 sn içinde kullanılmazsa geçersiz olur.
+- Asterisk yapılandırması `asterisk/conf/` altındadır; `asterisk/entrypoint.sh` açılışta şablonları `.env` değerleriyle doldurur ve eksik ayarda Türkçe hata vererek durur.
+- İmaj: Ubuntu 24.04 + Asterisk 20 (paket), root olmayan `asterisk` kullanıcısıyla çalışır; yalnızca gereken modüller yüklenir (AMI, HTTP, chan_sip vb. kapalı).
+- Asistanın YAML'ında `telephony: enabled: true` olmalı (örnek: `agents/botfusions-satis.yaml`).
+
+### VPS gereksinimleri
+- **Sabit genel IP** (Netgsm kaydı ve ses için). Bu IP `.env`'de `EXTERNAL_IP` olur.
+- Güvenlik duvarında açılacaklar: **5060/udp** (SIP) ve **10000-10100/udp** (RTP; `RTP_START`/`RTP_END` ile aynı). Mümkünse 5060'ı yalnızca Netgsm IP'lerine açın. **9092 açılmaz** (iç ağ).
+- Not: Docker, yayınlanan portlar için `ufw` kurallarını atlar; kısıtlamayı bulut sağlayıcının güvenlik duvarında veya `DOCKER-USER` zincirinde yapın.
+- **Netgsm paneli:** SIP trunk için kullanıcı adı, şifre ve SIP sunucu adresini panelden alın (`NETGSM_SIP_SERVER` için bu repoda doğrulanmış bir değer yok, **panelden kontrol edin**). Panelde IP kısıtlaması varsa VPS IP'sine izin verin. VPS yurt dışındaysa (ör. Almanya) paneldeki **yurt dışı erişim** iznini açın; kapalıysa kayıt reddedilir. (Menü adları panel sürümüne göre değişebilir.)
+
+### Kurulum (VPS)
+```bash
+cp .env.example .env            # doldurun (aşağıdaki değişkenler)
+# TELEPHONY_ENABLED=true
+# TELEPHONY_SECRET=$(openssl rand -hex 32)   ← voice-agent ve Asterisk aynı değeri okur
+# NETGSM_SIP_USER / NETGSM_SIP_PASSWORD / NETGSM_SIP_SERVER   ← Netgsm panelinden
+# EXTERNAL_IP=<VPS genel IP>
+docker compose --profile telephony up -d --build
+docker compose logs -f asterisk
+docker compose exec asterisk asterisk -rx "pjsip show registrations"   # "Registered" görmelisiniz
+```
+Sonra numaranızı cep telefonundan arayın. `--profile telephony` verilmezse yalnızca web asistanı çalışır.
+
+### Bilgisayarda Netgsm olmadan test
+Docker Desktop + bir softphone (MicroSIP, Zoiper) ile:
+1. `.env`: `TELEPHONY_ENABLED=true`, `TELEPHONY_SECRET=<rastgele>`, `EXTERNAL_IP=127.0.0.1`, `SOFTPHONE_PASSWORD=<en az 12 karakter>`; `NETGSM_*` boş kalsın.
+2. `docker compose --profile telephony up -d --build`
+3. Softphone hesabı: sunucu/alan adı `127.0.0.1`, kullanıcı `1001`, şifre `SOFTPHONE_PASSWORD`, taşıma UDP, codec G.711 (PCMA/PCMU). Softphone'un kendi yerel portu 5060 ise başka bir porta alın (5060'ı Docker kullanır).
+4. **100**'ü arayın; asistan karşılamalı. `SOFTPHONE_PASSWORD` boşsa bu hesap hiç oluşturulmaz — sunucuda gerekmedikçe boş bırakın.
+
+### KVKK
+- Karşılama cümlesinde arayana **yapay zekâ ile konuştuğunu** ve **görüşmenin kaydedildiğini** söyleyin (örnek: `agents/botfusions-satis.yaml` → `telephony.greeting`); aydınlatma metnine bağlantıyı web sitenizde bulundurun.
+- Arayan numarası ve transkript kişisel veridir; ses Google Gemini'ye (yurt dışı) gider. Yurt dışına aktarım ve saklama süresi için hukuk danışmanınızla aydınlatma/onay metnini netleştirin.
+
+### Bilinen sınırlar
+- **Ses kalitesi:** telefon hattı 8 kHz'dir (G.711); tanıma ve ses, web widget'ına göre daha düşük kalitededir.
+- **Gecikme:** modelin ~1,3 sn'lik yanıt süresine telefon ağı ve yeniden örnekleme eklenir; toplamda 1,5–2,5 sn beklenebilir (tahmin; telefonda henüz ölçülmedi).
+- **Yalnızca gelen arama.** Giden arama (otomatik arama/kampanya) yok; yapılacaksa ticari ileti izinleri için **İYS** kaydı ve kontrolü gerekir.
+- Eşzamanlı arama sayısı `asterisk/conf/asterisk.conf` → `maxcalls` (20) ve voice-agent'ın günlük limitleriyle sınırlıdır.
+- Sunucu aramayı kapattığında Asterisk 20 günlüğe `Failed to receive frame from AudioSocket` yazabilir; bu beklenen bir mesajdır.
+
+### Sorun giderme
+| Belirti | Olası neden / çözüm |
+|---|---|
+| Asterisk açılmıyor, `HATA: ...` | Mesajdaki `.env` değişkenini doldurun (ör. `TELEPHONY_SECRET`, `EXTERNAL_IP`). |
+| `pjsip show registrations` → `Rejected` / `Unregistered` | Kullanıcı adı/şifre yanlış, Netgsm panelinde IP izni yok ya da yurt dışı erişim kapalı; `NETGSM_SIP_SERVER` değerini panelden kontrol edin. |
+| Arama geliyor ama **tek yönlü ses / hiç ses yok** | NAT/RTP: `EXTERNAL_IP` sunucunun gerçek genel IP'si mi, 10000-10100/udp güvenlik duvarında ve compose'da açık mı? |
+| Arama açılıp hemen kapanıyor | `docker compose logs asterisk` → `Kayit reddedildi`: `TELEPHONY_SECRET` iki tarafta aynı mı, `TELEPHONY_ENABLED=true` mi, `TELEPHONY_AGENT` doğru ve YAML'da `telephony.enabled: true` mi? |
+| Softphone kayıt olamıyor | Şifre/kullanıcı (1001) ve sunucu `127.0.0.1`; softphone yerel portu 5060 ile çakışıyor olabilir. |
+| SIP ayrıntısı görmek | `docker compose exec asterisk asterisk -rx "pjsip set logger on"` sonra `docker compose logs -f asterisk`. |
+
 ## Testler
 ```bash
 python3 -m pytest -q            # 158 test, ağ gerekmez (Gemini ve webhook'lar sahte)
@@ -133,7 +196,7 @@ bash tests/widget/run.sh        # widget: Playwright + sahte sunucu (Chromium ge
 - **Maliyet:** `/admin`'deki maliyet `server/admin.py` üstündeki `COST_PER_1M` sabitinden tahmindir; kendi faturanızla güncelleyin.
 - **Tek sunucu:** Çağrı sayaçları ve ADK oturumları bellekte; birden fazla worker/sunucu için paylaşılan depo gerekir.
 - **Kötüye kullanım:** IP başına oturum sınırı yok; günlük kota maliyeti sınırlar ama tek kullanıcı kotayı tüketebilir.
-- **Kapsam dışı:** telefon hattı (Twilio/SIP), kamera/ekran paylaşımı, çok kiracılı panel, ödeme.
+- **Kapsam dışı:** kamera/ekran paylaşımı, çok kiracılı panel, ödeme.
 - **Tarayıcılar:** Chromium'da test edildi; Safari/iOS ve Firefox gerçek cihazda denenmedi.
 - ADK'nın canlı API'si deneysel olarak işaretli.
 

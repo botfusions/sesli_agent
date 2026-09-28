@@ -170,6 +170,17 @@ class Theme(_Strict):
         return v
 
 
+class Telephony(_Strict):
+    """Telefon kanalı (Asterisk AudioSocket) ayarları; bölüm yoksa kanal kapalıdır."""
+
+    enabled: bool = False
+    greeting: str | None = None                   # yoksa agent.greeting kullanılır
+    # Aynı numaradan günlük en fazla arama; 0 → arayan başına sınır yok
+    # (genel günlük limitler her durumda geçerlidir)
+    max_daily_calls_per_caller: int = Field(default=5, ge=0)
+    instructions: str | None = None               # yalnızca telefon kanalına eklenen talimat
+
+
 class AgentConfig(_Strict):
     id: str
     name: str
@@ -183,6 +194,7 @@ class AgentConfig(_Strict):
     allowed_origins: list[str] = Field(default_factory=list)
     limits: Limits = Field(default_factory=Limits)
     theme: Theme = Field(default_factory=Theme)
+    telephony: Telephony = Field(default_factory=Telephony)
 
     @field_validator("id")
     @classmethod

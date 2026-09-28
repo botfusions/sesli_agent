@@ -192,6 +192,20 @@ class Store:
             ).fetchone()
         return {"sessions": int(row["n"]), "seconds": float(row["s"])}
 
+    def count_sessions_today(self, agent_id: str, origin: str) -> int:
+        """Bugün (UTC) bu asistanda aynı origin ile açılan oturum sayısı.
+
+        Telefon kanalında origin arayanı temsil eder (`tel:<maskeli>|<hmac8>`);
+        arayan başına günlük arama limiti buna göre uygulanır.
+        """
+        start = _utc_day_start(time.time())
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM sessions WHERE agent_id = ? AND origin = ? AND started_at >= ?",
+                (agent_id, origin, start),
+            ).fetchone()
+        return int(row["n"])
+
     def list_sessions(self, agent_id: str | None = None, limit: int = 50, offset: int = 0) -> list[dict]:
         limit = max(1, min(int(limit), 500))
         offset = max(0, int(offset))
