@@ -484,5 +484,8 @@ async def _summarize_later(store, session_id: str, transcript: list[dict], langu
         text = await summary.summarize(transcript, language.split("-")[0] or "tr")
         if text:
             await asyncio.to_thread(store.set_summary, session_id, text)
+            # Bu oturumda CRM'e aday yazıldıysa özeti adayın kaydına ekle (notes_column tanımlıysa)
+            from server import crm_supabase
+            await crm_supabase.attach_summary(session_id, text)
     except Exception:
         logger.exception("Summary generation failed for session %s", session_id)

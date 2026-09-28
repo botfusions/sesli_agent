@@ -70,6 +70,11 @@ _ERROR_MESSAGES: dict[str, str] = {
     "rate_limited": "Bu işlem bu görüşmede çok fazla denendi.",
     "invalid_args": "İşlem için gerekli bilgiler eksik ya da hatalı.",
     "internal_error": "Beklenmeyen bir hata oluştu.",
+    # Supabase CRM aracı
+    "crm_not_configured": "Kayıt sistemi henüz yapılandırılmamış.",
+    "crm_unauthorized": "Kayıt sistemine erişim izni yok.",
+    "crm_table_missing": "Kayıt sisteminde gerekli tablo bulunamadı.",
+    "crm_error": "Kayıt sistemi talebi kaydedemedi.",
 }
 _HTTP_ERROR_MESSAGE = "Sistem isteği kabul etmedi."
 _OK_SUMMARY = "İşlem tamamlandı."
@@ -428,6 +433,34 @@ class WebhookAdkTool(BaseTool):
         return {"ok": False, "error": code, "message": message}
 
 
+class SupabaseCrmAdkTool(WebhookAdkTool):
+    """`type: supabase_crm` aracı: adayı ve görevi BOTCRm'in Supabase tablolarına yazar."""
+
+    async def run_async(self, *, args: dict[str, Any], tool_context: "ToolContext") -> dict:
+        from server import crm_supabase  # geç import: webhook-only kurulumlarda gerekmesin
+
+        session_id = self._resolve_session_id(tool_context)
+        await self._emit("start", "Kaydınız oluşturuluyor…")
+        try:
+            clean_args = validate_args(self.webhook, args)
+        except ArgumentError as exc:
+            logger.info("tool %s: invalid args: %s", self.name, exc)
+            result: dict = {"ok": False, "error": "invalid_args"}
+        else:
+            if not _take_call_slot(self.agent_id, session_id, self.name):
+                result = {"ok": False, "error": "rate_limited"}
+            else:
+                result = await crm_supabase.book(self.webhook, clean_args, session_id=session_id,
+                                                 client=self._client)
+        if result.get("ok"):
+            await self._emit("ok", "Kaydınız alındı.")
+            return {"ok": True, "data": result.get("data")}
+        code = str(result.get("error", "internal_error"))
+        message = error_message(code)
+        await self._emit("error", message)
+        return {"ok": False, "error": code, "message": message}
+
+
 def build_adk_tools(
     agent: "AgentConfig",
     on_event: ToolEventCallback,
@@ -440,8 +473,8 @@ def build_adk_tools(
     `session_id` verilirse webhook'a o gönderilir (storage oturum kimliği);
     verilmezse ADK oturum kimliği (`tool_context.session.id`) kullanılır.
     """
-    return [
-        WebhookAdkTool(t, agent_id=agent.id, on_event=on_event,
-                       session_id=session_id, client=client)
-        for t in (agent.tools or [])
-    ]
+    out: list[BaseTool] = []
+    for t in agent.tools or []:
+        cls = SupabaseCrmAdkTool if getattr(t, "type", "webhook") == "supabase_crm" else WebhookAdkTool
+        out.append(cls(t, agent_id=agent.id, on_event=on_event, session_id=session_id, client=client))
+    return out

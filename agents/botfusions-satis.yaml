@@ -50,29 +50,17 @@ knowledge: |
   - Fiyatlar, süreler ve referans müşteriler projeye göre değişir; bunlar demo görüşmesinde konuşulur.
 
 tools:
-  - name: book_demo
-    description: >-
-      Ziyaretçi için Botfusions ekibiyle demo / tanışma görüşmesi talebi oluşturur.
-      Yalnızca kullanıcı adını, iletişim bilgisini ve tercih ettiği zamanı verip onayladıktan sonra çağır.
-    parameters:
-      name:
-        type: string
-        description: Kullanıcının adı soyadı
-      contact:
-        type: string
-        description: E-posta adresi veya telefon numarası
-      preferred_time:
-        type: string
-        description: Görüşme için tercih edilen gün/saat (kullanıcının söylediği şekliyle, ör. "Perşembe öğleden sonra")
-      note:
-        type: string
-        description: Kullanıcının ilgilendiği konu veya ek not
-        required: false
-    url: https://example.invalid/webhook/book-demo   # yer tutucu: gerçek webhook adresiyle değiştirin
-    method: POST
-    timeout_s: 8
-    secret_env: BOOK_DEMO_SECRET
-    speak_while_running: false  # randevu kesin onay ister: sonuç gelmeden "iletiyorum" demesin
+  # Randevu talebi doğrudan BOTCRm'e (Supabase) yazılır: bots_leads'e aday, bots_tasks'a görev.
+  # Anahtarlar burada DEĞİL, .env'de: SUPABASE_URL ve SUPABASE_SERVICE_ROLE_KEY.
+  # Webhook ile (ör. kendi sunucunuz ya da n8n) çalışmak için README'deki "type: webhook" örneğine bakın.
+  - type: supabase_crm
+    name: book_demo
+    lead_source: Sesli Asistan
+    lead_status: Meeting Scheduled
+    lead_tags: [sesli-asistan]
+    tasks_table: bots_tasks
+    # notes_column: notes   # BOTCRm'de not kolonu açılınca görüşme özeti adaya eklenir
+    speak_while_running: false  # randevu kesin onay ister: sonuç gelmeden "alındı" demesin
 
 allowed_origins:
   - https://botfusions.com

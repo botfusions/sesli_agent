@@ -144,5 +144,7 @@ def test_repo_agent_yaml_is_valid():
     assert "https://www.botfusions.com" in a.allowed_origins
     tool = a.tools[0]
     assert tool.name == "book_demo"
-    assert tool.secret_env == "BOOK_DEMO_SECRET"
-    assert {"name", "contact", "preferred_time"} <= set(tool.parameters)
+    # Örnek asistan randevuyu doğrudan BOTCRm'e (Supabase) yazar ve sonucu bekler
+    assert tool.type == "supabase_crm"
+    assert tool.speak_while_running is False
+    assert {"name", "email", "phone", "preferred_time"} <= set(tool.parameters)

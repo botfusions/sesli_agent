@@ -9,11 +9,12 @@ import logging
 import re
 import threading
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Any, Literal, Union
 from urllib.parse import urlsplit
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
+from pydantic import (BaseModel, ConfigDict, Discriminator, Field, HttpUrl, Tag, field_validator,
+                      model_validator)
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,7 @@ class ToolParam(_Strict):
 
 
 class WebhookTool(_Strict):
+    type: Literal["webhook"] = "webhook"
     name: str
     description: str
     parameters: dict[str, ToolParam] = Field(default_factory=dict)
@@ -79,6 +81,76 @@ class WebhookTool(_Strict):
         return v
 
 
+def _default_crm_params() -> dict[str, "ToolParam"]:
+    return {
+        "name": ToolParam(type="string", description="Kişinin adı soyadı"),
+        "email": ToolParam(type="string", description="E-posta adresi (e-posta veya telefondan en az biri)", required=False),
+        "phone": ToolParam(type="string", description="Telefon numarası (e-posta veya telefondan en az biri)", required=False),
+        "preferred_time": ToolParam(type="string", description="Kişinin tercih ettiği görüşme günü/saati, söylediği gibi"),
+        "note": ToolParam(type="string", description="Kişinin ihtiyacına dair kısa not", required=False),
+    }
+
+
+class SupabaseCrmTool(_Strict):
+    """Yerleşik CRM aracı: adayı Supabase'deki CRM tablolarına (BOTCRm) yazar.
+
+    Anahtarlar YAML'a yazılmaz; yalnızca ortam değişkeni ADLARI verilir.
+    Service role anahtarı yalnızca sunucuda kalır, istemciye asla gitmez.
+    """
+
+    type: Literal["supabase_crm"]
+    name: str = "book_demo"
+    description: str = (
+        "Kişi için Botfusions ekibiyle demo / tanışma görüşmesi talebi oluşturur ve CRM'e kaydeder. "
+        "Yalnızca kullanıcı adını, e-posta veya telefonunu ve tercih ettiği zamanı verip onayladıktan sonra çağır."
+    )
+    parameters: dict[str, ToolParam] = Field(default_factory=_default_crm_params)
+    url_env: str = "SUPABASE_URL"
+    key_env: str = "SUPABASE_SERVICE_ROLE_KEY"
+    leads_table: str = "bots_leads"
+    tasks_table: str | None = "bots_tasks"       # None → görev açılmaz
+    lead_source: str = "Sesli Asistan"
+    lead_status: str = "Meeting Scheduled"
+    lead_tags: list[str] = Field(default_factory=lambda: ["sesli-asistan"])
+    task_assigned_to: str = "Sesli Asistan"
+    notes_column: str | None = None               # ör. "notes": oturum özeti bu kolona eklenir
+    timeout_s: float = Field(default=8.0, ge=1, le=30)
+    speak_while_running: bool = False             # CRM kaydı kesin onay ister: sonuç beklenir
+
+    @field_validator("name")
+    @classmethod
+    def _check_name(cls, v: str) -> str:
+        if not TOOL_NAME_RE.match(v):
+            raise ValueError("araç adı ^[a-z][a-z0-9_]{1,40}$ biçiminde olmalı")
+        return v
+
+    @field_validator("url_env", "key_env")
+    @classmethod
+    def _check_env(cls, v: str) -> str:
+        if not ENV_NAME_RE.match(v):
+            raise ValueError("url_env/key_env bir ortam değişkeni ADI olmalı")
+        return v
+
+    @field_validator("leads_table", "tasks_table", "notes_column")
+    @classmethod
+    def _check_ident(cls, v: str | None) -> str | None:
+        if v is not None and not PARAM_NAME_RE.match(v):
+            raise ValueError(f"geçersiz tablo/kolon adı: {v!r}")
+        return v
+
+
+def _tool_kind(value: Any) -> str:
+    if isinstance(value, dict):
+        return value.get("type", "webhook")
+    return getattr(value, "type", "webhook")
+
+
+AnyTool = Annotated[
+    Union[Annotated[WebhookTool, Tag("webhook")], Annotated[SupabaseCrmTool, Tag("supabase_crm")]],
+    Discriminator(_tool_kind),
+]
+
+
 class Limits(_Strict):
     max_session_seconds: int = Field(default=600, ge=10, le=3600)
     max_daily_sessions: int = Field(default=200, ge=0)
@@ -107,7 +179,7 @@ class AgentConfig(_Strict):
     instructions: str
     greeting: str | None = None
     knowledge: str | None = None
-    tools: list[WebhookTool] = Field(default_factory=list)
+    tools: list[AnyTool] = Field(default_factory=list)
     allowed_origins: list[str] = Field(default_factory=list)
     limits: Limits = Field(default_factory=Limits)
     theme: Theme = Field(default_factory=Theme)

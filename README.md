@@ -86,6 +86,31 @@ Kayıtlar `./data`, asistan dosyaları `./agents` klasöründe kalır (imajı ye
 
 Bilgi metnine **yalnızca doğrulanmış** bilgi yazın; talimat, bilmediği konuda uydurmamasını söyler.
 
+## BOTCRm (Supabase) bağlantısı
+Asistan randevu aldığında kaydı doğrudan BOTCRm'e yazabilir (`type: supabase_crm` aracı):
+- `bots_leads`: e-postaya (yoksa telefona) göre aranır. Varsa durum/etiket güncellenir, yoksa yeni aday açılır (kaynak `Sesli Asistan`, durum `Meeting Scheduled`). Telefonlar `+90…` biçimine çevrilir.
+- `bots_tasks`: adaya bağlı "Demo görüşmesi: <ad> — tercih: <zaman>" görevi açılır.
+- `notes_column` verilirse (ör. `notes`) oturum sonu özeti adayın kaydına eklenir. BOTCRm'de şu an böyle bir kolon yok; açılınca etkinleştirin.
+
+`.env`'ye ekleyin (yalnızca sunucuda kalır, istemciye gitmez):
+```
+SUPABASE_URL=https://<proje>.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=<service role anahtarı>
+```
+Service role anahtarı RLS'i atlar; bu yüzden asla tarayıcı koduna, repoya ya da sohbete koymayın. Kayıt başarısız olursa asistan kullanıcıya bunu söyler ve hata `/admin`'de görünür.
+
+Webhook örneği (kendi sunucunuz ya da n8n):
+```yaml
+tools:
+  - type: webhook
+    name: book_demo
+    description: Demo talebi oluşturur.
+    url: https://sunucunuz/webhooks/book_demo
+    secret_env: BOOK_DEMO_SECRET
+    parameters:
+      name: {type: string, description: Ad soyad}
+```
+
 ## Webhook alıcısı (müşteri tarafı)
 `examples/webhook_receiver.py` imza doğrulayan bağımsız bir FastAPI örneğidir. Asistan her çağrıda şunu gönderir:
 ```
@@ -98,7 +123,7 @@ X-Botfusions-Signature: sha256=<HMAC-SHA256(secret, "<timestamp>." + gövde)>
 
 ## Testler
 ```bash
-python3 -m pytest -q            # 143 test, ağ gerekmez (Gemini ve webhook'lar sahte)
+python3 -m pytest -q            # 158 test, ağ gerekmez (Gemini ve webhook'lar sahte)
 bash tests/widget/run.sh        # widget: Playwright + sahte sunucu (Chromium gerekir)
 ```
 
