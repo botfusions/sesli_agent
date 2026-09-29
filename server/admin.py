@@ -193,12 +193,14 @@ def _env_float(name: str) -> float:
 
 # Netgsm 100 dk paketi (₺90, ÖİV+KDV dahil); env ile ezilir.
 NETGSM_DEFAULT_TRY_PER_MIN = 0.90
+# Sabit kur; env USD_TRY ile ezilir.
+DEFAULT_USD_TRY = 50.0
 
 
 def estimate_cost(s: dict) -> float:
     """Oturumun tahmini USD maliyeti: Gemini Live + özet/öğrenme (+ telefon dakikası).
 
-    Telefon dakikası USD_TRY doluysa eklenir; dakika fiyatı NETGSM_TRY_PER_MIN, yoksa NETGSM_DEFAULT_TRY_PER_MIN.
+    Telefon dakikası: NETGSM_TRY_PER_MIN / USD_TRY, yoksa varsayılanlar (0,90 TL/dk, 50 TL/USD).
     """
     p = COST_PER_1M
     in_audio, out_audio = _num(s.get("input_audio_tokens")), _num(s.get("output_audio_tokens"))
@@ -209,16 +211,18 @@ def estimate_cost(s: dict) -> float:
            + _num(s.get("aux_input_tokens")) * p["aux_in"]
            + _num(s.get("aux_output_tokens")) * p["aux_out"]) / 1_000_000
     per_min = _env_float("NETGSM_TRY_PER_MIN") or NETGSM_DEFAULT_TRY_PER_MIN
-    rate = _env_float("USD_TRY")
-    if per_min and rate and str(s.get("origin") or "").startswith("tel:"):
+    rate = _usd_try()
+    if str(s.get("origin") or "").startswith("tel:"):
         usd += _num(s.get("duration_s")) / 60 * per_min / rate
     return usd
 
 
 def _fmt_cost(usd: float) -> str:
-    """USD_TRY tanımlıysa TL, değilse USD gösterir."""
-    rate = _env_float("USD_TRY")
-    return f"₺{usd * rate:.2f}" if rate else f"${usd:.4f}"
+    return f"₺{usd * _usd_try():.2f}"
+
+
+def _usd_try() -> float:
+    return _env_float("USD_TRY") or DEFAULT_USD_TRY
 
 
 _REASON_LABELS = {
@@ -391,7 +395,7 @@ def admin_list(request: Request) -> Response:
 <th>Token (girdi / çıktı)</th><th>Tahmini maliyet</th></tr></thead>
 <tbody>{''.join(trs)}</tbody></table></div>
 <div class="pager">{prev_html}<span class="muted">{_e(total_html)}</span>{next_html}</div>
-<p class="muted">Maliyet tahminidir: Gemini Live (ses/metin ayrı) + özet/öğrenme + telefon dakikası (varsayılan 0,90 TL/dk; USD_TRY girildiyse).</p>"""
+<p class="muted">Maliyet tahminidir: Gemini Live (ses/metin ayrı) + özet/öğrenme + telefon dakikası (varsayılan 0,90 TL/dk, kur 50 TL/USD).</p>"""
     return _page("Oturumlar", body)
 
 

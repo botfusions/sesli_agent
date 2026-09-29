@@ -78,7 +78,7 @@ def test_list_and_detail_with_bearer(make_client, store):
     assert "botfusions-satis" in r.text and "destek" in r.text
     assert f"/admin/sessions/{sid}" in r.text
     assert "Kullanıcı kapattı" in r.text
-    assert "$0.7500" in r.text  # 1M metin girdi token * COST_PER_1M["live_in_text"]
+    assert "₺37.50" in r.text  # 1M metin girdi token * 0.75 USD * 50 TL
     assert "#0E0B15" in r.text and "#A855F7" in r.text
     assert r.headers["cache-control"] == "no-store"
 
@@ -180,7 +180,8 @@ def test_estimate_cost_modalities_aux_and_phone(monkeypatch):
          "aux_input_tokens": 1_000_000, "aux_output_tokens": 1_000_000,
          "origin": "tel:0532***|abcd1234", "duration_s": 120}
     # 2M metin*0.75 + 1M ses*3 + 1M ses çıktı*12 + aux 0.75 + 3.75
-    assert round(estimate_cost(s), 6) == 21.0
+    assert round(estimate_cost(s), 6) == 21.036  # varsayılan 2 dk * 0.90 TL / 50
+    assert _fmt_cost(1.0) == "₺50.00"
     monkeypatch.setenv("USD_TRY", "40")
     assert round(estimate_cost(s), 6) == 21.045  # varsayılan 2 dk * 0.90 TL / 40
     monkeypatch.setenv("NETGSM_TRY_PER_MIN", "0,50")
