@@ -191,10 +191,14 @@ def _env_float(name: str) -> float:
     return _num(os.environ.get(name, "").strip().replace(",", "."))
 
 
+# Netgsm 100 dk paketi (₺90, ÖİV+KDV dahil); env ile ezilir.
+NETGSM_DEFAULT_TRY_PER_MIN = 0.90
+
+
 def estimate_cost(s: dict) -> float:
     """Oturumun tahmini USD maliyeti: Gemini Live + özet/öğrenme (+ telefon dakikası).
 
-    Telefon dakikası yalnızca NETGSM_TRY_PER_MIN ve USD_TRY ortam değişkenleri doluysa eklenir.
+    Telefon dakikası USD_TRY doluysa eklenir; dakika fiyatı NETGSM_TRY_PER_MIN, yoksa NETGSM_DEFAULT_TRY_PER_MIN.
     """
     p = COST_PER_1M
     in_audio, out_audio = _num(s.get("input_audio_tokens")), _num(s.get("output_audio_tokens"))
@@ -204,7 +208,8 @@ def estimate_cost(s: dict) -> float:
            + out_text * p["live_out_text"] + out_audio * p["live_out_audio"]
            + _num(s.get("aux_input_tokens")) * p["aux_in"]
            + _num(s.get("aux_output_tokens")) * p["aux_out"]) / 1_000_000
-    per_min, rate = _env_float("NETGSM_TRY_PER_MIN"), _env_float("USD_TRY")
+    per_min = _env_float("NETGSM_TRY_PER_MIN") or NETGSM_DEFAULT_TRY_PER_MIN
+    rate = _env_float("USD_TRY")
     if per_min and rate and str(s.get("origin") or "").startswith("tel:"):
         usd += _num(s.get("duration_s")) / 60 * per_min / rate
     return usd
@@ -386,7 +391,7 @@ def admin_list(request: Request) -> Response:
 <th>Token (girdi / çıktı)</th><th>Tahmini maliyet</th></tr></thead>
 <tbody>{''.join(trs)}</tbody></table></div>
 <div class="pager">{prev_html}<span class="muted">{_e(total_html)}</span>{next_html}</div>
-<p class="muted">Maliyet tahminidir: Gemini Live (ses/metin ayrı) + özet/öğrenme + telefon dakikası (NETGSM_TRY_PER_MIN ve USD_TRY girildiyse).</p>"""
+<p class="muted">Maliyet tahminidir: Gemini Live (ses/metin ayrı) + özet/öğrenme + telefon dakikası (varsayılan 0,90 TL/dk; USD_TRY girildiyse).</p>"""
     return _page("Oturumlar", body)
 
 

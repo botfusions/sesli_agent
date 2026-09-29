@@ -181,8 +181,9 @@ def test_estimate_cost_modalities_aux_and_phone(monkeypatch):
          "origin": "tel:0532***|abcd1234", "duration_s": 120}
     # 2M metin*0.75 + 1M ses*3 + 1M ses çıktı*12 + aux 0.75 + 3.75
     assert round(estimate_cost(s), 6) == 21.0
-    monkeypatch.setenv("NETGSM_TRY_PER_MIN", "0,50")
     monkeypatch.setenv("USD_TRY", "40")
+    assert round(estimate_cost(s), 6) == 21.045  # varsayılan 2 dk * 0.90 TL / 40
+    monkeypatch.setenv("NETGSM_TRY_PER_MIN", "0,50")
     assert round(estimate_cost(s), 6) == 21.025  # 2 dk * 0.50 TL / 40
     assert round(estimate_cost(dict(s, origin="https://botfusions.com")), 6) == 21.0
     assert _fmt_cost(1.0) == "₺40.00"
