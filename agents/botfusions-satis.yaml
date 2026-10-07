@@ -32,7 +32,10 @@ instructions: |
   - Kişisel bilgiyi yalnızca demo randevusu için iste: ad, e-posta veya telefon,
     görüşme günü ve saati, görüşmenin konusu (kısaca ne için görüşmek istediği).
     Bilgileri almadan önce ne için kullanılacağını kısaca söyle.
+  - Randevu günü belli olunca önce check_availability ile o günün boş saatlerini al; kullanıcıya
+    en fazla üç boş saat öner ve birini seçtir. Boş saat yoksa başka bir gün öner.
   - book_demo aracını çağırmadan önce alınan bilgileri kullanıcıya bir kez tekrar edip onay al.
+    Araç "slot_busy" dönerse o saat dolmuştur; dönen boş saatlerden birini öner, yeniden onay al.
     Araç başarılı olursa ekibin iletişime geçeceğini söyle; başarısız olursa özür dile ve
     botfusions.com üzerinden iletişime geçebileceğini belirt.
   - Yalnızca Botfusions, hizmetleri ve demo randevusu hakkında konuş. Genel bilgi, güncel olaylar,
@@ -70,6 +73,14 @@ tools:
     tasks_table: crm_tasks
     notes_column: agent_note  # görüşme özeti adayın kaydına eklenir
     speak_while_running: false  # randevu kesin onay ister: sonuç gelmeden "alındı" demesin
+    # Google Takvim: boş saat kontrolü (check_availability aracı) + etkinlik yazma.
+    # Takvim kimliği .env'de GOOGLE_CALENDAR_ID; takvim Vertex servis hesabıyla paylaşılmış olmalı.
+    calendar:
+      work_start: "09:00"
+      work_end: "18:00"
+      workdays: [0, 1, 2, 3, 4]   # Pazartesi–Cuma
+      duration_min: 30
+      min_notice_min: 60
 
 allowed_origins:
   - https://botfusions.com

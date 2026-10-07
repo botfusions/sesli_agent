@@ -222,6 +222,24 @@ async def book(tool: "SupabaseCrmTool", args: dict, *, session_id: str,
         date = time = None
     if not name or not date or not time or not (email or phone):
         return {"ok": False, "error": "invalid_args"}
+    event_link = None
+    if tool.calendar:
+        from server import gcal  # geç import: takvimsiz kurulumlarda gerekmesin
+    if tool.calendar and not gcal.configured(tool.calendar):
+        logger.warning("calendar configured in YAML but %s is empty; skipping calendar step",
+                       tool.calendar.calendar_id_env)
+    elif tool.calendar:
+        try:
+            today = dt.datetime.now(gcal.tz(tool.calendar)).date()
+            if not (today <= date <= today + dt.timedelta(days=tool.calendar.max_days_ahead)):
+                return {"ok": False, "error": "slot_busy", "free_slots": []}
+            slots = await gcal.free_slots(tool.calendar, date, client=client)
+            if time not in slots:
+                return {"ok": False, "error": "slot_busy", "free_slots": slots}
+            event_link = await gcal.insert_event(tool.calendar, date=date, time=time, name=name, topic=topic,
+                                                 email=email, phone=phone, note=note, client=client)
+        except gcal.CalendarError as exc:
+            return {"ok": False, "error": exc.code}
     try:
         crm = SupabaseCrm(tool, client=client)
         lead_id, is_new = await crm.upsert_lead(name=name, email=email, phone=phone, note=note)
@@ -233,7 +251,10 @@ async def book(tool: "SupabaseCrmTool", args: dict, *, session_id: str,
         except CrmError as exc:
             # Aday kaydedildi; görev açılamaması randevu talebini bozmaz
             logger.warning("CRM task creation failed: %s", exc.code)
-        return {"ok": True, "data": {"lead": "created" if is_new else "updated", "task_created": task_created}}
+        data = {"lead": "created" if is_new else "updated", "task_created": task_created}
+        if event_link is not None:
+            data["calendar_event"] = True
+        return {"ok": True, "data": data}
     except CrmError as exc:
         return {"ok": False, "error": exc.code}
     except Exception:  # noqa: BLE001

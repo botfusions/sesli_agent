@@ -43,7 +43,7 @@ from google.genai import types
 if TYPE_CHECKING:  # Döngüsel/erken import'u önlemek için yalnızca tip denetiminde
     from google.adk.tools.tool_context import ToolContext
 
-    from server.config import AgentConfig, WebhookTool
+    from server.config import AgentConfig, SupabaseCrmTool, WebhookTool
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,12 @@ _ERROR_MESSAGES: dict[str, str] = {
     "crm_unauthorized": "Kayıt sistemine erişim izni yok.",
     "crm_table_missing": "Kayıt sisteminde gerekli tablo bulunamadı.",
     "crm_error": "Kayıt sistemi talebi kaydedemedi.",
+    # Google Takvim
+    "calendar_not_configured": "Takvim henüz yapılandırılmamış.",
+    "calendar_unauthorized": "Takvime erişim izni yok.",
+    "calendar_not_found": "Takvim bulunamadı.",
+    "calendar_error": "Takvim isteği tamamlanamadı.",
+    "slot_busy": "Bu saat uygun değil; boş saatlerden birini önerin.",
 }
 _HTTP_ERROR_MESSAGE = "Sistem isteği kabul etmedi."
 _OK_SUMMARY = "İşlem tamamlandı."
@@ -458,7 +464,52 @@ class SupabaseCrmAdkTool(WebhookAdkTool):
         code = str(result.get("error", "internal_error"))
         message = error_message(code)
         await self._emit("error", message)
-        return {"ok": False, "error": code, "message": message}
+        out = {"ok": False, "error": code, "message": message}
+        if "free_slots" in result:
+            out["free_slots"] = result["free_slots"]
+        return out
+
+
+class AvailabilityAdkTool(BaseTool):
+    """`check_availability`: Google Takvim'de verilen günün boş saatlerini döndürür (yalnız okur)."""
+
+    def __init__(self, crm_tool: "SupabaseCrmTool", *, agent_id: str, on_event: ToolEventCallback,
+                 session_id: str | None = None, client: httpx.AsyncClient | None = None):
+        super().__init__(
+            name="check_availability",
+            description=("Verilen gün için demo görüşmesine uygun boş saatleri döndürür. Kullanıcı gün söyleyince, "
+                         "book_demo çağırmadan ÖNCE çağır ve boş saatlerden seçtir."),
+        )
+        self.calendar = crm_tool.calendar
+        self.agent_id = agent_id
+        self._on_event = on_event
+        self._session_id = session_id
+        self._client = client
+
+    def _get_declaration(self) -> types.FunctionDeclaration:
+        return types.FunctionDeclaration(
+            name=self.name, description=self.description,
+            parameters=types.Schema(type=types.Type.OBJECT, required=["date"], properties={
+                "date": types.Schema(type=types.Type.STRING, description="Gün, YYYY-MM-DD (ör. 2026-10-09)")}))
+
+    async def run_async(self, *, args: dict[str, Any], tool_context: "ToolContext") -> dict:
+        import datetime as dt
+
+        from server import gcal
+
+        session_id = self._session_id or (tool_context.session.id if tool_context else "unknown")
+        try:
+            date = dt.date.fromisoformat(str((args or {}).get("date", "")).strip())
+        except ValueError:
+            return {"ok": False, "error": "invalid_args", "message": error_message("invalid_args")}
+        if not _take_call_slot(self.agent_id, session_id, self.name):
+            return {"ok": False, "error": "rate_limited", "message": error_message("rate_limited")}
+        try:
+            slots = await gcal.free_slots(self.calendar, date, client=self._client)
+        except gcal.CalendarError as exc:
+            return {"ok": False, "error": exc.code, "message": error_message(exc.code)}
+        return {"ok": True, "data": {"date": date.isoformat(), "free_slots": slots,
+                                     "duration_min": self.calendar.duration_min}}
 
 
 def build_adk_tools(
@@ -477,4 +528,6 @@ def build_adk_tools(
     for t in agent.tools or []:
         cls = SupabaseCrmAdkTool if getattr(t, "type", "webhook") == "supabase_crm" else WebhookAdkTool
         out.append(cls(t, agent_id=agent.id, on_event=on_event, session_id=session_id, client=client))
+        if getattr(t, "calendar", None):
+            out.append(AvailabilityAdkTool(t, agent_id=agent.id, on_event=on_event, session_id=session_id, client=client))
     return out

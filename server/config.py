@@ -93,6 +93,55 @@ def _default_crm_params() -> dict[str, "ToolParam"]:
     }
 
 
+class CalendarConfig(_Strict):
+    """Google Takvim (server/gcal.py): randevu öncesi müsaitlik kontrolü + etkinlik yazma.
+
+    Takvim kimliği YAML'a değil ortam değişkenine yazılır (repo public). Servis hesabı =
+    Vertex için kullanılan GOOGLE_APPLICATION_CREDENTIALS; takvim o hesapla paylaşılmalı.
+    """
+
+    calendar_id_env: str = "GOOGLE_CALENDAR_ID"
+    timezone: str = "Europe/Istanbul"
+    work_start: str = "09:00"
+    work_end: str = "18:00"
+    workdays: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4])  # 0=Pazartesi
+    duration_min: int = Field(default=30, ge=5, le=480)
+    min_notice_min: int = Field(default=60, ge=0)        # en erken randevu: şimdiden şu kadar sonra
+    max_days_ahead: int = Field(default=60, ge=1, le=365)
+    timeout_s: float = Field(default=8.0, ge=1, le=30)
+
+    @field_validator("calendar_id_env")
+    @classmethod
+    def _check_env(cls, v: str) -> str:
+        if not ENV_NAME_RE.match(v):
+            raise ValueError("calendar_id_env bir ortam değişkeni ADI olmalı")
+        return v
+
+    @field_validator("work_start", "work_end")
+    @classmethod
+    def _check_time(cls, v: str) -> str:
+        if not re.fullmatch(r"[0-2]\d:[0-5]\d", v):
+            raise ValueError("saat HH:MM biçiminde olmalı")
+        return v
+
+    @field_validator("workdays")
+    @classmethod
+    def _check_days(cls, v: list[int]) -> list[int]:
+        if not v or any(d < 0 or d > 6 for d in v):
+            raise ValueError("workdays 0-6 arası gün numaraları olmalı (0=Pazartesi)")
+        return sorted(set(v))
+
+    @field_validator("timezone")
+    @classmethod
+    def _check_tz(cls, v: str) -> str:
+        import zoneinfo
+        try:
+            zoneinfo.ZoneInfo(v)
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"bilinmeyen saat dilimi: {v!r}") from exc
+        return v
+
+
 class SupabaseCrmTool(_Strict):
     """Yerleşik CRM aracı: adayı Supabase'deki CRM tablolarına (BOTCRm) yazar.
 
@@ -116,6 +165,7 @@ class SupabaseCrmTool(_Strict):
     lead_tags: list[str] = Field(default_factory=lambda: ["sesli-asistan"])
     task_assigned_to: str = "Sesli Asistan"
     notes_column: str | None = None               # ör. "notes": oturum özeti bu kolona eklenir
+    calendar: CalendarConfig | None = None        # verilirse: müsaitlik kontrolü + Google Takvim etkinliği
     timeout_s: float = Field(default=8.0, ge=1, le=30)
     speak_while_running: bool = False             # CRM kaydı kesin onay ister: sonuç beklenir
 
