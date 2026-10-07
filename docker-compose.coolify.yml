@@ -20,7 +20,8 @@ services:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
       SUPABASE_URL: ${SUPABASE_URL}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
-      GOOGLE_CALENDAR_ID: ${GOOGLE_CALENDAR_ID:-}
+      # Varsayılan: servis hesabının açtığı "Botfusions Randevular" takvimi (erişim yalnızca paylaşım yetkisiyle)
+      GOOGLE_CALENDAR_ID: ${GOOGLE_CALENDAR_ID:-19bcd965454adcf7eaca7f49f8770e265010bb2c8ad1340bf8dbb3e4a30ab07c@group.calendar.google.com}
       TELEPHONY_ENABLED: "true"
       TELEPHONY_SECRET: ${TELEPHONY_SECRET}
       TELEPHONY_AGENT: ${TELEPHONY_AGENT:-botfusions-satis}
